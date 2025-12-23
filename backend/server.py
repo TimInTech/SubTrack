@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Request
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -15,6 +15,33 @@ from datetime import datetime, timedelta
 from bson import ObjectId
 from enum import Enum
 
+# Import custom utilities
+from utils.errors import (
+    SubTrackException,
+    ValidationError,
+    NotFoundError,
+    DatabaseError,
+    subtrack_exception_handler,
+    http_exception_handler,
+    general_exception_handler,
+    create_success_response
+)
+from utils.validators import (
+    validate_objectid,
+    validate_positive_amount,
+    validate_url,
+    validate_date_format,
+    validate_billing_cycle,
+    sanitize_string
+)
+from utils.database import (
+    safe_find_one_or_404,
+    safe_insert_one,
+    safe_update_one,
+    safe_delete_one,
+    safe_find
+)
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -24,7 +51,16 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ.get('DB_NAME', 'subscription_tracker')]
 
 # Create the main app
-app = FastAPI(title="Abonnement & Fixkosten Tracker")
+app = FastAPI(
+    title="Abonnement & Fixkosten Tracker",
+    description="API für die Verwaltung von Abonnements und Fixkosten",
+    version="1.0.0"
+)
+
+# Register exception handlers
+app.add_exception_handler(SubTrackException, subtrack_exception_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(Exception, general_exception_handler)
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -36,12 +72,10 @@ class BillingCycle(str, Enum):
     YEARLY = "YEARLY"
 
 
-# Helper function for ObjectId
+# Helper function for ObjectId (deprecated - use validators.validate_objectid instead)
 def str_to_objectid(id_str: str) -> ObjectId:
-    try:
-        return ObjectId(id_str)
-    except:
-        raise HTTPException(status_code=400, detail="Ungültige ID")
+    """Convert string to ObjectId. Use validators.validate_objectid for new code."""
+    return validate_objectid(id_str, "Resource")
 
 
 # Subscription Models
@@ -57,9 +91,21 @@ class SubscriptionBase(BaseModel):
     @field_validator('cancel_url')
     @classmethod
     def validate_url(cls, v):
+        """Validate cancel URL format."""
         if v is not None and v.strip() != '':
             if not (v.startswith('http://') or v.startswith('https://')):
                 raise ValueError('URL muss mit http:// oder https:// beginnen')
+        return v
+    
+    @field_validator('start_date')
+    @classmethod
+    def validate_start_date(cls, v):
+        """Validate start date format."""
+        if v:
+            try:
+                datetime.strptime(v, "%Y-%m-%d")
+            except ValueError:
+                raise ValueError('Datumsformat muss YYYY-MM-DD sein')
         return v
 
 
@@ -129,9 +175,46 @@ async def root():
 @api_router.get("/subscriptions", response_model=List[Subscription])
 async def get_subscriptions():
     """Alle Abonnements abrufen"""
-    subscriptions = await db.subscriptions.find().sort("name", 1).to_list(1000)
-    return [
-        Subscription(
+    try:
+        subscriptions = await safe_find(
+            db.subscriptions,
+            sort_field="name",
+            sort_order=1,
+            resource_name="Abonnements"
+        )
+        return [
+            Subscription(
+                id=str(sub["_id"]),
+                name=sub["name"],
+                category=sub["category"],
+                amount_cents=sub["amount_cents"],
+                billing_cycle=sub["billing_cycle"],
+                start_date=sub["start_date"],
+                notes=sub.get("notes"),
+                cancel_url=sub.get("cancel_url"),
+                created_at=sub.get("created_at", datetime.utcnow())
+            )
+            for sub in subscriptions
+        ]
+    except DatabaseError:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching subscriptions: {str(e)}")
+        raise DatabaseError("Fehler beim Abrufen der Abonnements")
+
+
+@api_router.get("/subscriptions/{subscription_id}", response_model=Subscription)
+async def get_subscription(subscription_id: str):
+    """Ein Abonnement abrufen"""
+    try:
+        obj_id = validate_objectid(subscription_id, "Abonnement")
+        sub = await safe_find_one_or_404(
+            db.subscriptions,
+            {"_id": obj_id},
+            resource_name="Abonnement",
+            resource_id=subscription_id
+        )
+        return Subscription(
             id=str(sub["_id"]),
             name=sub["name"],
             category=sub["category"],
@@ -142,63 +225,106 @@ async def get_subscriptions():
             cancel_url=sub.get("cancel_url"),
             created_at=sub.get("created_at", datetime.utcnow())
         )
-        for sub in subscriptions
-    ]
-
-
-@api_router.get("/subscriptions/{subscription_id}", response_model=Subscription)
-async def get_subscription(subscription_id: str):
-    """Ein Abonnement abrufen"""
-    sub = await db.subscriptions.find_one({"_id": str_to_objectid(subscription_id)})
-    if not sub:
-        raise HTTPException(status_code=404, detail="Abonnement nicht gefunden")
-    return Subscription(
-        id=str(sub["_id"]),
-        name=sub["name"],
-        category=sub["category"],
-        amount_cents=sub["amount_cents"],
-        billing_cycle=sub["billing_cycle"],
-        start_date=sub["start_date"],
-        notes=sub.get("notes"),
-        cancel_url=sub.get("cancel_url"),
-        created_at=sub.get("created_at", datetime.utcnow())
-    )
+    except (ValidationError, NotFoundError):
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching subscription {subscription_id}: {str(e)}")
+        raise DatabaseError("Fehler beim Abrufen des Abonnements")
 
 
 @api_router.post("/subscriptions", response_model=Subscription)
 async def create_subscription(subscription: SubscriptionCreate):
     """Neues Abonnement erstellen"""
-    sub_dict = subscription.model_dump()
-    sub_dict["created_at"] = datetime.utcnow()
-    result = await db.subscriptions.insert_one(sub_dict)
-    sub_dict["id"] = str(result.inserted_id)
-    return Subscription(**sub_dict)
+    try:
+        sub_dict = subscription.model_dump()
+        
+        # Sanitize string fields
+        sub_dict["name"] = sanitize_string(sub_dict["name"], max_length=200)
+        sub_dict["category"] = sanitize_string(sub_dict["category"], max_length=100)
+        sub_dict["notes"] = sanitize_string(sub_dict.get("notes"), max_length=1000)
+        sub_dict["cancel_url"] = sanitize_string(sub_dict.get("cancel_url"), max_length=500)
+        
+        # Validate
+        if not sub_dict["name"]:
+            raise ValidationError("Name darf nicht leer sein")
+        if not sub_dict["category"]:
+            raise ValidationError("Kategorie darf nicht leer sein")
+        
+        inserted_id = await safe_insert_one(
+            db.subscriptions,
+            sub_dict,
+            resource_name="Abonnement"
+        )
+        sub_dict["id"] = inserted_id
+        sub_dict["created_at"] = datetime.utcnow()
+        return Subscription(**sub_dict)
+    except ValidationError:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating subscription: {str(e)}")
+        raise DatabaseError("Fehler beim Erstellen des Abonnements")
 
 
 @api_router.put("/subscriptions/{subscription_id}", response_model=Subscription)
 async def update_subscription(subscription_id: str, subscription: SubscriptionUpdate):
     """Abonnement aktualisieren"""
-    update_data = {k: v for k, v in subscription.model_dump().items() if v is not None}
-    if not update_data:
-        raise HTTPException(status_code=400, detail="Keine Daten zum Aktualisieren")
-    
-    result = await db.subscriptions.update_one(
-        {"_id": str_to_objectid(subscription_id)},
-        {"$set": update_data}
-    )
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Abonnement nicht gefunden")
-    
-    return await get_subscription(subscription_id)
+    try:
+        obj_id = validate_objectid(subscription_id, "Abonnement")
+        update_data = {k: v for k, v in subscription.model_dump().items() if v is not None}
+        
+        if not update_data:
+            raise ValidationError("Keine Daten zum Aktualisieren")
+        
+        # Sanitize string fields
+        if "name" in update_data:
+            update_data["name"] = sanitize_string(update_data["name"], max_length=200)
+            if not update_data["name"]:
+                raise ValidationError("Name darf nicht leer sein")
+        if "category" in update_data:
+            update_data["category"] = sanitize_string(update_data["category"], max_length=100)
+            if not update_data["category"]:
+                raise ValidationError("Kategorie darf nicht leer sein")
+        if "notes" in update_data:
+            update_data["notes"] = sanitize_string(update_data.get("notes"), max_length=1000)
+        if "cancel_url" in update_data:
+            update_data["cancel_url"] = sanitize_string(update_data.get("cancel_url"), max_length=500)
+        
+        await safe_update_one(
+            db.subscriptions,
+            {"_id": obj_id},
+            update_data,
+            resource_name="Abonnement",
+            resource_id=subscription_id
+        )
+        
+        return await get_subscription(subscription_id)
+    except (ValidationError, NotFoundError):
+        raise
+    except Exception as e:
+        logger.error(f"Error updating subscription {subscription_id}: {str(e)}")
+        raise DatabaseError("Fehler beim Aktualisieren des Abonnements")
 
 
 @api_router.delete("/subscriptions/{subscription_id}")
 async def delete_subscription(subscription_id: str):
     """Abonnement löschen"""
-    result = await db.subscriptions.delete_one({"_id": str_to_objectid(subscription_id)})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Abonnement nicht gefunden")
-    return {"message": "Abonnement gelöscht"}
+    try:
+        obj_id = validate_objectid(subscription_id, "Abonnement")
+        await safe_delete_one(
+            db.subscriptions,
+            {"_id": obj_id},
+            resource_name="Abonnement",
+            resource_id=subscription_id
+        )
+        return create_success_response(
+            data={"id": subscription_id},
+            message="Abonnement gelöscht"
+        )
+    except (ValidationError, NotFoundError):
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting subscription {subscription_id}: {str(e)}")
+        raise DatabaseError("Fehler beim Löschen des Abonnements")
 
 
 # ===== EXPENSE ENDPOINTS =====
@@ -206,9 +332,44 @@ async def delete_subscription(subscription_id: str):
 @api_router.get("/expenses", response_model=List[Expense])
 async def get_expenses():
     """Alle Fixkosten abrufen"""
-    expenses = await db.expenses.find().sort("name", 1).to_list(1000)
-    return [
-        Expense(
+    try:
+        expenses = await safe_find(
+            db.expenses,
+            sort_field="name",
+            sort_order=1,
+            resource_name="Fixkosten"
+        )
+        return [
+            Expense(
+                id=str(exp["_id"]),
+                name=exp["name"],
+                category=exp["category"],
+                amount_cents=exp["amount_cents"],
+                billing_cycle=exp["billing_cycle"],
+                notes=exp.get("notes"),
+                created_at=exp.get("created_at", datetime.utcnow())
+            )
+            for exp in expenses
+        ]
+    except DatabaseError:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching expenses: {str(e)}")
+        raise DatabaseError("Fehler beim Abrufen der Fixkosten")
+
+
+@api_router.get("/expenses/{expense_id}", response_model=Expense)
+async def get_expense(expense_id: str):
+    """Eine Fixkosten abrufen"""
+    try:
+        obj_id = validate_objectid(expense_id, "Fixkosten")
+        exp = await safe_find_one_or_404(
+            db.expenses,
+            {"_id": obj_id},
+            resource_name="Fixkosten",
+            resource_id=expense_id
+        )
+        return Expense(
             id=str(exp["_id"]),
             name=exp["name"],
             category=exp["category"],
@@ -217,61 +378,103 @@ async def get_expenses():
             notes=exp.get("notes"),
             created_at=exp.get("created_at", datetime.utcnow())
         )
-        for exp in expenses
-    ]
-
-
-@api_router.get("/expenses/{expense_id}", response_model=Expense)
-async def get_expense(expense_id: str):
-    """Eine Fixkosten abrufen"""
-    exp = await db.expenses.find_one({"_id": str_to_objectid(expense_id)})
-    if not exp:
-        raise HTTPException(status_code=404, detail="Fixkosten nicht gefunden")
-    return Expense(
-        id=str(exp["_id"]),
-        name=exp["name"],
-        category=exp["category"],
-        amount_cents=exp["amount_cents"],
-        billing_cycle=exp["billing_cycle"],
-        notes=exp.get("notes"),
-        created_at=exp.get("created_at", datetime.utcnow())
-    )
+    except (ValidationError, NotFoundError):
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching expense {expense_id}: {str(e)}")
+        raise DatabaseError("Fehler beim Abrufen der Fixkosten")
 
 
 @api_router.post("/expenses", response_model=Expense)
 async def create_expense(expense: ExpenseCreate):
     """Neue Fixkosten erstellen"""
-    exp_dict = expense.model_dump()
-    exp_dict["created_at"] = datetime.utcnow()
-    result = await db.expenses.insert_one(exp_dict)
-    exp_dict["id"] = str(result.inserted_id)
-    return Expense(**exp_dict)
+    try:
+        exp_dict = expense.model_dump()
+        
+        # Sanitize string fields
+        exp_dict["name"] = sanitize_string(exp_dict["name"], max_length=200)
+        exp_dict["category"] = sanitize_string(exp_dict["category"], max_length=100)
+        exp_dict["notes"] = sanitize_string(exp_dict.get("notes"), max_length=1000)
+        
+        # Validate
+        if not exp_dict["name"]:
+            raise ValidationError("Name darf nicht leer sein")
+        if not exp_dict["category"]:
+            raise ValidationError("Kategorie darf nicht leer sein")
+        
+        inserted_id = await safe_insert_one(
+            db.expenses,
+            exp_dict,
+            resource_name="Fixkosten"
+        )
+        exp_dict["id"] = inserted_id
+        exp_dict["created_at"] = datetime.utcnow()
+        return Expense(**exp_dict)
+    except ValidationError:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating expense: {str(e)}")
+        raise DatabaseError("Fehler beim Erstellen der Fixkosten")
 
 
 @api_router.put("/expenses/{expense_id}", response_model=Expense)
 async def update_expense(expense_id: str, expense: ExpenseUpdate):
     """Fixkosten aktualisieren"""
-    update_data = {k: v for k, v in expense.model_dump().items() if v is not None}
-    if not update_data:
-        raise HTTPException(status_code=400, detail="Keine Daten zum Aktualisieren")
-    
-    result = await db.expenses.update_one(
-        {"_id": str_to_objectid(expense_id)},
-        {"$set": update_data}
-    )
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Fixkosten nicht gefunden")
-    
-    return await get_expense(expense_id)
+    try:
+        obj_id = validate_objectid(expense_id, "Fixkosten")
+        update_data = {k: v for k, v in expense.model_dump().items() if v is not None}
+        
+        if not update_data:
+            raise ValidationError("Keine Daten zum Aktualisieren")
+        
+        # Sanitize string fields
+        if "name" in update_data:
+            update_data["name"] = sanitize_string(update_data["name"], max_length=200)
+            if not update_data["name"]:
+                raise ValidationError("Name darf nicht leer sein")
+        if "category" in update_data:
+            update_data["category"] = sanitize_string(update_data["category"], max_length=100)
+            if not update_data["category"]:
+                raise ValidationError("Kategorie darf nicht leer sein")
+        if "notes" in update_data:
+            update_data["notes"] = sanitize_string(update_data.get("notes"), max_length=1000)
+        
+        await safe_update_one(
+            db.expenses,
+            {"_id": obj_id},
+            update_data,
+            resource_name="Fixkosten",
+            resource_id=expense_id
+        )
+        
+        return await get_expense(expense_id)
+    except (ValidationError, NotFoundError):
+        raise
+    except Exception as e:
+        logger.error(f"Error updating expense {expense_id}: {str(e)}")
+        raise DatabaseError("Fehler beim Aktualisieren der Fixkosten")
 
 
 @api_router.delete("/expenses/{expense_id}")
 async def delete_expense(expense_id: str):
     """Fixkosten löschen"""
-    result = await db.expenses.delete_one({"_id": str_to_objectid(expense_id)})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Fixkosten nicht gefunden")
-    return {"message": "Fixkosten gelöscht"}
+    try:
+        obj_id = validate_objectid(expense_id, "Fixkosten")
+        await safe_delete_one(
+            db.expenses,
+            {"_id": obj_id},
+            resource_name="Fixkosten",
+            resource_id=expense_id
+        )
+        return create_success_response(
+            data={"id": expense_id},
+            message="Fixkosten gelöscht"
+        )
+    except (ValidationError, NotFoundError):
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting expense {expense_id}: {str(e)}")
+        raise DatabaseError("Fehler beim Löschen der Fixkosten")
 
 
 # ===== DASHBOARD ENDPOINT =====
@@ -279,43 +482,49 @@ async def delete_expense(expense_id: str):
 @api_router.get("/dashboard", response_model=DashboardSummary)
 async def get_dashboard():
     """Dashboard-Übersicht mit Summen"""
-    subscriptions = await db.subscriptions.find().to_list(1000)
-    expenses = await db.expenses.find().to_list(1000)
-    
-    # Calculate monthly amounts
-    monthly_subs = 0
-    yearly_subs_only = 0
-    for sub in subscriptions:
-        if sub["billing_cycle"] == "MONTHLY":
-            monthly_subs += sub["amount_cents"]
-        else:  # YEARLY
-            monthly_subs += sub["amount_cents"] // 12
-            yearly_subs_only += sub["amount_cents"]
-    
-    monthly_exps = 0
-    yearly_exps_only = 0
-    for exp in expenses:
-        if exp["billing_cycle"] == "MONTHLY":
-            monthly_exps += exp["amount_cents"]
-        else:  # YEARLY
-            monthly_exps += exp["amount_cents"] // 12
-            yearly_exps_only += exp["amount_cents"]
-    
-    total_monthly = monthly_subs + monthly_exps
-    
-    # Yearly calculation: monthly * 12 + yearly items
-    monthly_only_subs = sum(s["amount_cents"] for s in subscriptions if s["billing_cycle"] == "MONTHLY")
-    monthly_only_exps = sum(e["amount_cents"] for e in expenses if e["billing_cycle"] == "MONTHLY")
-    yearly_total = (monthly_only_subs + monthly_only_exps) * 12 + yearly_subs_only + yearly_exps_only
-    
-    return DashboardSummary(
-        monthly_subscriptions=monthly_subs,
-        monthly_expenses=monthly_exps,
-        total_monthly=total_monthly,
-        yearly_total=yearly_total,
-        subscription_count=len(subscriptions),
-        expense_count=len(expenses)
-    )
+    try:
+        subscriptions = await safe_find(db.subscriptions, resource_name="Abonnements")
+        expenses = await safe_find(db.expenses, resource_name="Fixkosten")
+        
+        # Calculate monthly amounts
+        monthly_subs = 0
+        yearly_subs_only = 0
+        for sub in subscriptions:
+            if sub["billing_cycle"] == "MONTHLY":
+                monthly_subs += sub["amount_cents"]
+            else:  # YEARLY
+                monthly_subs += sub["amount_cents"] // 12
+                yearly_subs_only += sub["amount_cents"]
+        
+        monthly_exps = 0
+        yearly_exps_only = 0
+        for exp in expenses:
+            if exp["billing_cycle"] == "MONTHLY":
+                monthly_exps += exp["amount_cents"]
+            else:  # YEARLY
+                monthly_exps += exp["amount_cents"] // 12
+                yearly_exps_only += exp["amount_cents"]
+        
+        total_monthly = monthly_subs + monthly_exps
+        
+        # Yearly calculation: monthly * 12 + yearly items
+        monthly_only_subs = sum(s["amount_cents"] for s in subscriptions if s["billing_cycle"] == "MONTHLY")
+        monthly_only_exps = sum(e["amount_cents"] for e in expenses if e["billing_cycle"] == "MONTHLY")
+        yearly_total = (monthly_only_subs + monthly_only_exps) * 12 + yearly_subs_only + yearly_exps_only
+        
+        return DashboardSummary(
+            monthly_subscriptions=monthly_subs,
+            monthly_expenses=monthly_exps,
+            total_monthly=total_monthly,
+            yearly_total=yearly_total,
+            subscription_count=len(subscriptions),
+            expense_count=len(expenses)
+        )
+    except DatabaseError:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching dashboard: {str(e)}")
+        raise DatabaseError("Fehler beim Abrufen des Dashboards")
 
 
 # ===== DEMO DATA ENDPOINT =====
