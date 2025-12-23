@@ -72,9 +72,20 @@ class BillingCycle(str, Enum):
     YEARLY = "YEARLY"
 
 
-# Helper function for ObjectId (deprecated - use validators.validate_objectid instead)
+# Helper function for ObjectId (deprecated - will be removed in future version)
 def str_to_objectid(id_str: str) -> ObjectId:
-    """Convert string to ObjectId. Use validators.validate_objectid for new code."""
+    """
+    Convert string to ObjectId.
+    
+    .. deprecated::
+        Use validators.validate_objectid instead. This function will be removed in version 2.0.
+    """
+    import warnings
+    warnings.warn(
+        "str_to_objectid is deprecated. Use validators.validate_objectid instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     return validate_objectid(id_str, "Resource")
 
 

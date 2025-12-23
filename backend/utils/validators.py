@@ -5,6 +5,7 @@ from datetime import datetime
 from bson import ObjectId
 from bson.errors import InvalidId
 from .errors import ValidationError, NotFoundError
+from .constants import VALID_BILLING_CYCLES
 
 
 def validate_objectid(id_str: str, resource_name: str = "Resource") -> ObjectId:
@@ -98,13 +99,11 @@ def validate_billing_cycle(cycle: Optional[str]) -> None:
     Raises:
         ValidationError: If billing cycle is invalid
     """
-    if cycle is not None:
-        valid_cycles = ["MONTHLY", "YEARLY"]
-        if cycle not in valid_cycles:
-            raise ValidationError(
-                message="Ungültiger Abrechnungszyklus",
-                details={"billing_cycle": cycle, "valid_values": valid_cycles}
-            )
+    if cycle is not None and cycle not in VALID_BILLING_CYCLES:
+        raise ValidationError(
+            message="Ungültiger Abrechnungszyklus",
+            details={"billing_cycle": cycle, "valid_values": VALID_BILLING_CYCLES}
+        )
 
 
 def sanitize_string(value: Optional[str], max_length: int = 500) -> Optional[str]:

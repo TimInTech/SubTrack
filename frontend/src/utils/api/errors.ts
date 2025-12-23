@@ -146,7 +146,9 @@ export function validateApiResponse<T>(response: any): ApiResponse<T> {
  * Log error for debugging (can be extended to send to monitoring service)
  */
 export function logError(error: SubTrackApiError, context?: string): void {
-  if (__DEV__) {
+  const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production';
+  
+  if (isDev) {
     console.error(`[SubTrack Error${context ? ` - ${context}` : ''}]:`, {
       message: error.message,
       code: error.code,

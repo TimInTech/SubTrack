@@ -5,6 +5,14 @@
 import { parseApiError, validateApiResponse, ApiResponse, SubTrackApiError } from './errors';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+
+// Validate API_URL is configured
+if (!API_URL) {
+  throw new Error(
+    'EXPO_PUBLIC_BACKEND_URL environment variable is not set. Please configure it in your .env file.'
+  );
+}
+
 const DEFAULT_TIMEOUT = 30000; // 30 seconds
 
 export interface RequestOptions extends RequestInit {

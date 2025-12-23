@@ -8,6 +8,16 @@ import { DashboardData, Subscription, Expense } from '../types';
 import { apiGet, apiPost, apiPut, apiDelete, SubTrackApiError, logError } from '../utils/api';
 
 /**
+ * Ensure error is a SubTrackApiError
+ */
+function ensureApiError(error: unknown): SubTrackApiError {
+  if (error instanceof SubTrackApiError) {
+    return error;
+  }
+  return new SubTrackApiError(String(error));
+}
+
+/**
  * Show error alert to user
  */
 function showErrorAlert(error: SubTrackApiError, context: string): void {
@@ -28,7 +38,7 @@ export const useDashboard = () => {
       const dashboardData = await apiGet<DashboardData>('/api/dashboard');
       setData(dashboardData);
     } catch (err) {
-      const apiError = err instanceof SubTrackApiError ? err : new SubTrackApiError(String(err));
+      const apiError = ensureApiError(err);
       setError(apiError);
       logError(apiError, 'Dashboard fetch');
     } finally {
@@ -43,7 +53,7 @@ export const useDashboard = () => {
       await fetch();
       return true;
     } catch (err) {
-      const apiError = err instanceof SubTrackApiError ? err : new SubTrackApiError(String(err));
+      const apiError = ensureApiError(err);
       logError(apiError, 'Demo data load');
       return false;
     } finally {
@@ -67,7 +77,7 @@ export const useSubscriptions = () => {
       const data = await apiGet<Subscription[]>('/api/subscriptions');
       setSubscriptions(data);
     } catch (err) {
-      const apiError = err instanceof SubTrackApiError ? err : new SubTrackApiError(String(err));
+      const apiError = ensureApiError(err);
       setError(apiError);
       logError(apiError, 'Subscriptions fetch');
     } finally {
@@ -79,7 +89,7 @@ export const useSubscriptions = () => {
     try {
       return await apiGet<Subscription>(`/api/subscriptions/${id}`);
     } catch (err) {
-      const apiError = err instanceof SubTrackApiError ? err : new SubTrackApiError(String(err));
+      const apiError = ensureApiError(err);
       logError(apiError, `Subscription fetch: ${id}`);
       return null;
     }
@@ -91,7 +101,7 @@ export const useSubscriptions = () => {
       await fetch();
       return true;
     } catch (err) {
-      const apiError = err instanceof SubTrackApiError ? err : new SubTrackApiError(String(err));
+      const apiError = ensureApiError(err);
       showErrorAlert(apiError, 'Subscription create');
       return false;
     }
@@ -103,7 +113,7 @@ export const useSubscriptions = () => {
       await fetch();
       return true;
     } catch (err) {
-      const apiError = err instanceof SubTrackApiError ? err : new SubTrackApiError(String(err));
+      const apiError = ensureApiError(err);
       showErrorAlert(apiError, 'Subscription update');
       return false;
     }
@@ -115,7 +125,7 @@ export const useSubscriptions = () => {
       await fetch();
       return true;
     } catch (err) {
-      const apiError = err instanceof SubTrackApiError ? err : new SubTrackApiError(String(err));
+      const apiError = ensureApiError(err);
       showErrorAlert(apiError, 'Subscription delete');
       return false;
     }
@@ -137,7 +147,7 @@ export const useExpenses = () => {
       const data = await apiGet<Expense[]>('/api/expenses');
       setExpenses(data);
     } catch (err) {
-      const apiError = err instanceof SubTrackApiError ? err : new SubTrackApiError(String(err));
+      const apiError = ensureApiError(err);
       setError(apiError);
       logError(apiError, 'Expenses fetch');
     } finally {
@@ -149,7 +159,7 @@ export const useExpenses = () => {
     try {
       return await apiGet<Expense>(`/api/expenses/${id}`);
     } catch (err) {
-      const apiError = err instanceof SubTrackApiError ? err : new SubTrackApiError(String(err));
+      const apiError = ensureApiError(err);
       logError(apiError, `Expense fetch: ${id}`);
       return null;
     }
@@ -161,7 +171,7 @@ export const useExpenses = () => {
       await fetch();
       return true;
     } catch (err) {
-      const apiError = err instanceof SubTrackApiError ? err : new SubTrackApiError(String(err));
+      const apiError = ensureApiError(err);
       showErrorAlert(apiError, 'Expense create');
       return false;
     }
@@ -173,7 +183,7 @@ export const useExpenses = () => {
       await fetch();
       return true;
     } catch (err) {
-      const apiError = err instanceof SubTrackApiError ? err : new SubTrackApiError(String(err));
+      const apiError = ensureApiError(err);
       showErrorAlert(apiError, 'Expense update');
       return false;
     }
@@ -185,7 +195,7 @@ export const useExpenses = () => {
       await fetch();
       return true;
     } catch (err) {
-      const apiError = err instanceof SubTrackApiError ? err : new SubTrackApiError(String(err));
+      const apiError = ensureApiError(err);
       showErrorAlert(apiError, 'Expense delete');
       return false;
     }
