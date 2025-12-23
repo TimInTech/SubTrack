@@ -254,17 +254,12 @@ export default function DashboardScreen() {
             <GlassCard style={styles.chartCard}>
               <Text style={styles.sectionTitle}>Kostenverteilung</Text>
               <View style={styles.chartContainer}>
-                <PieChart
-                  data={chartData}
-                  donut
-                  radius={70}
-                  innerRadius={50}
-                  centerLabelComponent={() => (
-                    <View style={styles.chartCenter}>
-                      <MaterialCommunityIcons name="percent" size={20} color={COLORS.textSecondary} />
-                    </View>
-                  )}
-                />
+                <View style={styles.chartWrapper}>
+                  <SimplePieChart data={chartData} size={140} />
+                  <View style={styles.chartCenterOverlay}>
+                    <MaterialCommunityIcons name="percent" size={24} color={COLORS.textSecondary} />
+                  </View>
+                </View>
                 <View style={styles.chartLegend}>
                   {chartData.map((item, index) => (
                     <View key={index} style={styles.legendItem}>
