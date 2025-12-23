@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from 'expo-router';
-import { PieChart } from 'react-native-gifted-charts';
+import Svg, { Circle, G } from 'react-native-svg';
 
 import { COLORS, SPACING, RADIUS, FONTS, SHADOWS } from '../src/constants/theme';
 import { GlassCard, AnimatedNumber, ProgressBar } from '../src/components/ui';
@@ -23,6 +23,51 @@ import { useDashboard } from '../src/hooks/useApi';
 import { formatCurrency } from '../src/utils/format';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// Simple Pie Chart Component
+interface PieChartProps {
+  data: { value: number; color: string; label: string }[];
+  size?: number;
+}
+
+const SimplePieChart: React.FC<PieChartProps> = ({ data, size = 140 }) => {
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+  if (total === 0) return null;
+
+  const radius = size / 2;
+  const innerRadius = radius * 0.65;
+  const strokeWidth = radius - innerRadius;
+  const circumference = 2 * Math.PI * (innerRadius + strokeWidth / 2);
+
+  let currentAngle = 0;
+
+  return (
+    <Svg width={size} height={size}>
+      <G rotation="-90" origin={`${radius}, ${radius}`}>
+        {data.map((item, index) => {
+          const percentage = item.value / total;
+          const strokeDasharray = `${circumference * percentage} ${circumference * (1 - percentage)}`;
+          const strokeDashoffset = -circumference * currentAngle;
+          currentAngle += percentage;
+
+          return (
+            <Circle
+              key={index}
+              cx={radius}
+              cy={radius}
+              r={innerRadius + strokeWidth / 2}
+              stroke={item.color}
+              strokeWidth={strokeWidth}
+              fill="transparent"
+              strokeDasharray={strokeDasharray}
+              strokeDashoffset={strokeDashoffset}
+            />
+          );
+        })}
+      </G>
+    </Svg>
+  );
+};
 
 export default function DashboardScreen() {
   const { data, loading, fetch, loadDemoData, setLoading } = useDashboard();
