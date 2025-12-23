@@ -421,6 +421,329 @@ async def create_demo_data():
     return {"message": "Demo-Daten erfolgreich angelegt", "subscriptions": len(demo_subs), "expenses": len(demo_exps)}
 
 
+# ===== EXPORT ENDPOINTS =====
+
+class ExportData(BaseModel):
+    version: str = "1.0"
+    exported_at: str
+    subscriptions: List[Dict[str, Any]]
+    expenses: List[Dict[str, Any]]
+    settings: Optional[Dict[str, Any]] = None
+
+
+class ImportData(BaseModel):
+    subscriptions: Optional[List[Dict[str, Any]]] = None
+    expenses: Optional[List[Dict[str, Any]]] = None
+    merge: bool = False  # If False, replace all data
+
+
+@api_router.get("/export/json")
+async def export_json():
+    """Export all data as JSON"""
+    subscriptions = await db.subscriptions.find().to_list(1000)
+    expenses = await db.expenses.find().to_list(1000)
+    settings = await db.settings.find_one({"type": "app_settings"})
+    
+    # Convert ObjectIds to strings
+    for sub in subscriptions:
+        sub["id"] = str(sub.pop("_id"))
+        if "created_at" in sub and isinstance(sub["created_at"], datetime):
+            sub["created_at"] = sub["created_at"].isoformat()
+    
+    for exp in expenses:
+        exp["id"] = str(exp.pop("_id"))
+        if "created_at" in exp and isinstance(exp["created_at"], datetime):
+            exp["created_at"] = exp["created_at"].isoformat()
+    
+    export_data = {
+        "version": "1.0",
+        "app_name": "Abonnement & Fixkosten Tracker",
+        "exported_at": datetime.utcnow().isoformat(),
+        "subscriptions": subscriptions,
+        "expenses": expenses,
+        "settings": settings if settings else {}
+    }
+    
+    return JSONResponse(content=export_data)
+
+
+@api_router.get("/export/csv")
+async def export_csv():
+    """Export all data as CSV (returns JSON with CSV strings)"""
+    subscriptions = await db.subscriptions.find().to_list(1000)
+    expenses = await db.expenses.find().to_list(1000)
+    
+    # Create subscriptions CSV
+    sub_output = io.StringIO()
+    sub_fields = ["name", "category", "amount_cents", "billing_cycle", "start_date", "notes", "cancel_url"]
+    sub_writer = csv.DictWriter(sub_output, fieldnames=sub_fields, extrasaction='ignore')
+    sub_writer.writeheader()
+    for sub in subscriptions:
+        sub_writer.writerow(sub)
+    
+    # Create expenses CSV
+    exp_output = io.StringIO()
+    exp_fields = ["name", "category", "amount_cents", "billing_cycle", "notes"]
+    exp_writer = csv.DictWriter(exp_output, fieldnames=exp_fields, extrasaction='ignore')
+    exp_writer.writeheader()
+    for exp in expenses:
+        exp_writer.writerow(exp)
+    
+    return {
+        "subscriptions_csv": sub_output.getvalue(),
+        "expenses_csv": exp_output.getvalue(),
+        "exported_at": datetime.utcnow().isoformat()
+    }
+
+
+@api_router.post("/import/json")
+async def import_json(data: ImportData):
+    """Import data from JSON backup"""
+    imported_subs = 0
+    imported_exps = 0
+    
+    if not data.merge:
+        # Clear existing data if not merging
+        await db.subscriptions.delete_many({})
+        await db.expenses.delete_many({})
+    
+    if data.subscriptions:
+        for sub in data.subscriptions:
+            # Remove id field if exists, let MongoDB generate new one
+            sub.pop("id", None)
+            sub.pop("_id", None)
+            if "created_at" not in sub:
+                sub["created_at"] = datetime.utcnow()
+            elif isinstance(sub["created_at"], str):
+                try:
+                    sub["created_at"] = datetime.fromisoformat(sub["created_at"].replace("Z", "+00:00"))
+                except:
+                    sub["created_at"] = datetime.utcnow()
+            await db.subscriptions.insert_one(sub)
+            imported_subs += 1
+    
+    if data.expenses:
+        for exp in data.expenses:
+            exp.pop("id", None)
+            exp.pop("_id", None)
+            if "created_at" not in exp:
+                exp["created_at"] = datetime.utcnow()
+            elif isinstance(exp["created_at"], str):
+                try:
+                    exp["created_at"] = datetime.fromisoformat(exp["created_at"].replace("Z", "+00:00"))
+                except:
+                    exp["created_at"] = datetime.utcnow()
+            await db.expenses.insert_one(exp)
+            imported_exps += 1
+    
+    return {
+        "message": "Daten erfolgreich importiert",
+        "subscriptions_imported": imported_subs,
+        "expenses_imported": imported_exps,
+        "merged": data.merge
+    }
+
+
+# ===== SETTINGS ENDPOINTS =====
+
+class AppSettings(BaseModel):
+    currency: str = "EUR"
+    notification_enabled: bool = True
+    notification_time: str = "09:00"  # HH:MM format
+    notification_days_before: List[int] = [1, 3, 7]  # Days before renewal
+    theme: str = "dark"
+    backup_interval: str = "weekly"  # daily, weekly, monthly
+    last_backup: Optional[str] = None
+
+
+@api_router.get("/settings")
+async def get_settings():
+    """Get app settings"""
+    settings = await db.settings.find_one({"type": "app_settings"})
+    if not settings:
+        # Return default settings
+        return AppSettings().model_dump()
+    settings.pop("_id", None)
+    settings.pop("type", None)
+    return settings
+
+
+@api_router.put("/settings")
+async def update_settings(settings: AppSettings):
+    """Update app settings"""
+    settings_dict = settings.model_dump()
+    settings_dict["type"] = "app_settings"
+    settings_dict["updated_at"] = datetime.utcnow().isoformat()
+    
+    await db.settings.update_one(
+        {"type": "app_settings"},
+        {"$set": settings_dict},
+        upsert=True
+    )
+    return settings_dict
+
+
+# ===== NOTIFICATION ENDPOINTS =====
+
+class NotificationSettings(BaseModel):
+    subscription_id: str
+    enabled: bool = True
+    days_before: List[int] = [1, 3, 7]
+    custom_message: Optional[str] = None
+
+
+class ScheduledNotification(BaseModel):
+    id: str
+    subscription_id: str
+    subscription_name: str
+    scheduled_date: str
+    message: str
+    type: str  # renewal, trial_end, cancellation
+
+
+@api_router.get("/notifications/scheduled")
+async def get_scheduled_notifications():
+    """Get all scheduled notifications for upcoming renewals"""
+    subscriptions = await db.subscriptions.find().to_list(1000)
+    settings = await db.settings.find_one({"type": "app_settings"})
+    
+    days_before = [1, 3, 7]  # Default
+    if settings and "notification_days_before" in settings:
+        days_before = settings["notification_days_before"]
+    
+    notifications = []
+    today = datetime.utcnow().date()
+    
+    for sub in subscriptions:
+        try:
+            start_date = datetime.strptime(sub["start_date"], "%Y-%m-%d").date()
+            
+            # Calculate next renewal date
+            if sub["billing_cycle"] == "MONTHLY":
+                # Find next occurrence of the day
+                next_renewal = today.replace(day=start_date.day)
+                if next_renewal <= today:
+                    if today.month == 12:
+                        next_renewal = next_renewal.replace(year=today.year + 1, month=1)
+                    else:
+                        next_renewal = next_renewal.replace(month=today.month + 1)
+            else:  # YEARLY
+                next_renewal = start_date.replace(year=today.year)
+                if next_renewal <= today:
+                    next_renewal = next_renewal.replace(year=today.year + 1)
+            
+            # Check if notification should be shown
+            days_until = (next_renewal - today).days
+            
+            for days in days_before:
+                if days_until == days:
+                    notifications.append({
+                        "id": f"{sub['_id']}_{days}",
+                        "subscription_id": str(sub["_id"]),
+                        "subscription_name": sub["name"],
+                        "scheduled_date": next_renewal.isoformat(),
+                        "days_until": days_until,
+                        "message": f"{sub['name']} wird in {days_until} Tag(en) verlängert",
+                        "type": "renewal",
+                        "amount_cents": sub["amount_cents"]
+                    })
+        except Exception as e:
+            continue
+    
+    return {"notifications": notifications, "count": len(notifications)}
+
+
+@api_router.get("/notifications/subscription/{subscription_id}")
+async def get_subscription_notifications(subscription_id: str):
+    """Get notification settings for a specific subscription"""
+    settings = await db.notification_settings.find_one({"subscription_id": subscription_id})
+    if not settings:
+        return {"subscription_id": subscription_id, "enabled": True, "days_before": [1, 3, 7]}
+    settings.pop("_id", None)
+    return settings
+
+
+@api_router.put("/notifications/subscription/{subscription_id}")
+async def update_subscription_notifications(subscription_id: str, settings: NotificationSettings):
+    """Update notification settings for a specific subscription"""
+    settings_dict = settings.model_dump()
+    await db.notification_settings.update_one(
+        {"subscription_id": subscription_id},
+        {"$set": settings_dict},
+        upsert=True
+    )
+    return settings_dict
+
+
+# ===== ANALYTICS ENDPOINTS =====
+
+@api_router.get("/analytics/category-breakdown")
+async def get_category_breakdown():
+    """Get costs broken down by category"""
+    subscriptions = await db.subscriptions.find().to_list(1000)
+    expenses = await db.expenses.find().to_list(1000)
+    
+    categories = {}
+    
+    # Process subscriptions
+    for sub in subscriptions:
+        cat = sub["category"]
+        monthly = sub["amount_cents"] if sub["billing_cycle"] == "MONTHLY" else sub["amount_cents"] // 12
+        if cat not in categories:
+            categories[cat] = {"monthly": 0, "count": 0, "type": "mixed"}
+        categories[cat]["monthly"] += monthly
+        categories[cat]["count"] += 1
+    
+    # Process expenses
+    for exp in expenses:
+        cat = exp["category"]
+        monthly = exp["amount_cents"] if exp["billing_cycle"] == "MONTHLY" else exp["amount_cents"] // 12
+        if cat not in categories:
+            categories[cat] = {"monthly": 0, "count": 0, "type": "mixed"}
+        categories[cat]["monthly"] += monthly
+        categories[cat]["count"] += 1
+    
+    # Convert to list and sort by monthly cost
+    result = [
+        {"category": cat, "monthly_cents": data["monthly"], "count": data["count"]}
+        for cat, data in categories.items()
+    ]
+    result.sort(key=lambda x: x["monthly_cents"], reverse=True)
+    
+    return {"categories": result}
+
+
+@api_router.get("/analytics/top-subscriptions")
+async def get_top_subscriptions(limit: int = 5):
+    """Get top N most expensive subscriptions"""
+    subscriptions = await db.subscriptions.find().to_list(1000)
+    
+    # Calculate monthly cost for each
+    for sub in subscriptions:
+        sub["monthly_cost"] = sub["amount_cents"] if sub["billing_cycle"] == "MONTHLY" else sub["amount_cents"] // 12
+        sub["id"] = str(sub.pop("_id"))
+    
+    # Sort and limit
+    subscriptions.sort(key=lambda x: x["monthly_cost"], reverse=True)
+    
+    return {"top_subscriptions": subscriptions[:limit]}
+
+
+@api_router.delete("/data/all")
+async def delete_all_data():
+    """Delete all user data (factory reset)"""
+    await db.subscriptions.delete_many({})
+    await db.expenses.delete_many({})
+    await db.notification_settings.delete_many({})
+    # Keep settings but reset
+    await db.settings.update_one(
+        {"type": "app_settings"},
+        {"$set": AppSettings().model_dump()},
+        upsert=True
+    )
+    return {"message": "Alle Daten wurden gelöscht"}
+
+
 # Include the router in the main app
 app.include_router(api_router)
 
