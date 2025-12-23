@@ -10,55 +10,37 @@ import {
   Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { format, parseISO } from 'date-fns';
-import { de } from 'date-fns/locale';
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
-
-interface Subscription {
-  id: string;
-  name: string;
-  category: string;
-  amount_cents: number;
-  billing_cycle: 'MONTHLY' | 'YEARLY';
-  start_date: string;
-  notes?: string;
-  cancel_url?: string;
-  created_at: string;
-}
-
-const formatCurrency = (cents: number): string => {
-  return (cents / 100).toFixed(2).replace('.', ',') + ' €';
-};
+import { COLORS, SPACING, RADIUS, FONTS, SHADOWS } from '../../src/constants/theme';
+import { GlassCard } from '../../src/components/ui';
+import { useSubscriptions } from '../../src/hooks/useApi';
+import { formatCurrency, formatDate, getBillingCycleLabel } from '../../src/utils/format';
+import { Subscription } from '../../src/types';
 
 export default function SubscriptionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { fetchOne, remove } = useSubscriptions();
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchSubscription();
+    loadSubscription();
   }, [id]);
 
-  const fetchSubscription = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/subscriptions/${id}`);
-      if (response.ok) {
-        const data = await response.json();
-        setSubscription(data);
-      } else {
-        Alert.alert('Fehler', 'Abonnement nicht gefunden.');
-        router.back();
-      }
-    } catch (error) {
-      console.error('Fehler beim Laden:', error);
-      Alert.alert('Fehler', 'Verbindungsfehler.');
-    } finally {
-      setLoading(false);
+  const loadSubscription = async () => {
+    if (!id) return;
+    const data = await fetchOne(id);
+    if (data) {
+      setSubscription(data);
+    } else {
+      Alert.alert('Fehler', 'Abonnement nicht gefunden.');
+      router.back();
     }
+    setLoading(false);
   };
 
   const openCancelUrl = async () => {
@@ -82,15 +64,11 @@ export default function SubscriptionDetailScreen() {
           text: 'Löschen',
           style: 'destructive',
           onPress: async () => {
-            try {
-              const response = await fetch(`${API_URL}/api/subscriptions/${id}`, {
-                method: 'DELETE',
-              });
-              if (response.ok) {
+            if (id) {
+              const success = await remove(id);
+              if (success) {
                 router.back();
               }
-            } catch (error) {
-              Alert.alert('Fehler', 'Löschen fehlgeschlagen.');
             }
           },
         },
@@ -98,11 +76,24 @@ export default function SubscriptionDetailScreen() {
     );
   };
 
+  const getServiceIcon = (serviceName: string): string => {
+    const name = serviceName.toLowerCase();
+    if (name.includes('netflix')) return 'netflix';
+    if (name.includes('spotify')) return 'spotify';
+    if (name.includes('amazon')) return 'amazon';
+    if (name.includes('disney')) return 'movie-star';
+    if (name.includes('youtube')) return 'youtube';
+    if (name.includes('apple')) return 'apple';
+    if (name.includes('microsoft') || name.includes('office')) return 'microsoft';
+    if (name.includes('icloud') || name.includes('cloud')) return 'cloud';
+    return 'credit-card';
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#4CAF50" />
+          <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
       </SafeAreaView>
     );
@@ -118,56 +109,66 @@ export default function SubscriptionDetailScreen() {
     );
   }
 
-  let formattedDate = subscription.start_date;
-  try {
-    formattedDate = format(parseISO(subscription.start_date), 'dd. MMMM yyyy', { locale: de });
-  } catch (e) {
-    // Keep original if parsing fails
-  }
-
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Header Card */}
-        <View style={styles.headerCard}>
+        <LinearGradient
+          colors={COLORS.gradientPurple as [string, string]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.headerCard}
+        >
           <View style={styles.headerIcon}>
-            <Ionicons name="card" size={40} color="#4CAF50" />
+            <MaterialCommunityIcons
+              name={getServiceIcon(subscription.name) as any}
+              size={40}
+              color="#fff"
+            />
           </View>
           <Text style={styles.name}>{subscription.name}</Text>
-          <Text style={styles.category}>{subscription.category}</Text>
+          <View style={styles.categoryBadge}>
+            <Text style={styles.categoryText}>{subscription.category}</Text>
+          </View>
           <View style={styles.priceContainer}>
             <Text style={styles.price}>{formatCurrency(subscription.amount_cents)}</Text>
             <Text style={styles.cycle}>
               {subscription.billing_cycle === 'MONTHLY' ? 'pro Monat' : 'pro Jahr'}
             </Text>
           </View>
-        </View>
+        </LinearGradient>
 
-        {/* Details */}
-        <View style={styles.detailsCard}>
+        {/* Details Card */}
+        <GlassCard style={styles.detailsCard}>
           <Text style={styles.sectionTitle}>Details</Text>
 
           <View style={styles.detailRow}>
-            <Ionicons name="calendar-outline" size={20} color="#888" />
+            <View style={[styles.detailIcon, { backgroundColor: `${COLORS.secondary}20` }]}>
+              <MaterialCommunityIcons name="calendar" size={20} color={COLORS.secondary} />
+            </View>
             <View style={styles.detailContent}>
               <Text style={styles.detailLabel}>Startdatum</Text>
-              <Text style={styles.detailValue}>{formattedDate}</Text>
+              <Text style={styles.detailValue}>{formatDate(subscription.start_date)}</Text>
             </View>
           </View>
 
           <View style={styles.detailRow}>
-            <Ionicons name="repeat" size={20} color="#888" />
+            <View style={[styles.detailIcon, { backgroundColor: `${COLORS.info}20` }]}>
+              <MaterialCommunityIcons name="repeat" size={20} color={COLORS.info} />
+            </View>
             <View style={styles.detailContent}>
               <Text style={styles.detailLabel}>Abrechnungszyklus</Text>
               <Text style={styles.detailValue}>
-                {subscription.billing_cycle === 'MONTHLY' ? 'Monatlich' : 'Jährlich'}
+                {getBillingCycleLabel(subscription.billing_cycle)}
               </Text>
             </View>
           </View>
 
           {subscription.billing_cycle === 'YEARLY' && (
             <View style={styles.detailRow}>
-              <Ionicons name="calculator-outline" size={20} color="#888" />
+              <View style={[styles.detailIcon, { backgroundColor: `${COLORS.success}20` }]}>
+                <MaterialCommunityIcons name="calculator" size={20} color={COLORS.success} />
+              </View>
               <View style={styles.detailContent}>
                 <Text style={styles.detailLabel}>Pro Monat (umgerechnet)</Text>
                 <Text style={styles.detailValue}>
@@ -177,28 +178,51 @@ export default function SubscriptionDetailScreen() {
             </View>
           )}
 
+          {subscription.billing_cycle === 'MONTHLY' && (
+            <View style={styles.detailRow}>
+              <View style={[styles.detailIcon, { backgroundColor: `${COLORS.success}20` }]}>
+                <MaterialCommunityIcons name="calculator" size={20} color={COLORS.success} />
+              </View>
+              <View style={styles.detailContent}>
+                <Text style={styles.detailLabel}>Pro Jahr (hochgerechnet)</Text>
+                <Text style={styles.detailValue}>
+                  {formatCurrency(subscription.amount_cents * 12)}
+                </Text>
+              </View>
+            </View>
+          )}
+
           {subscription.notes && (
             <View style={styles.detailRow}>
-              <Ionicons name="document-text-outline" size={20} color="#888" />
+              <View style={[styles.detailIcon, { backgroundColor: `${COLORS.accent}20` }]}>
+                <MaterialCommunityIcons name="text" size={20} color={COLORS.accent} />
+              </View>
               <View style={styles.detailContent}>
                 <Text style={styles.detailLabel}>Notizen</Text>
                 <Text style={styles.detailValue}>{subscription.notes}</Text>
               </View>
             </View>
           )}
-        </View>
+        </GlassCard>
 
         {/* Cancel URL Button */}
         {subscription.cancel_url && (
-          <TouchableOpacity style={styles.cancelUrlButton} onPress={openCancelUrl}>
-            <Ionicons name="open-outline" size={20} color="#fff" />
-            <Text style={styles.cancelUrlText}>Kündigungslink öffnen</Text>
+          <TouchableOpacity activeOpacity={0.8} onPress={openCancelUrl}>
+            <LinearGradient
+              colors={COLORS.gradientCyan as [string, string]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.cancelUrlButton}
+            >
+              <MaterialCommunityIcons name="open-in-new" size={20} color="#fff" />
+              <Text style={styles.cancelUrlText}>Kündigungslink öffnen</Text>
+            </LinearGradient>
           </TouchableOpacity>
         )}
 
         {/* Delete Button */}
         <TouchableOpacity style={styles.deleteButton} onPress={deleteSubscription}>
-          <Ionicons name="trash-outline" size={20} color="#f44336" />
+          <MaterialCommunityIcons name="trash-can-outline" size={20} color={COLORS.error} />
           <Text style={styles.deleteButtonText}>Abo löschen</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -209,7 +233,7 @@ export default function SubscriptionDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0c0c0c',
+    backgroundColor: COLORS.background,
   },
   loadingContainer: {
     flex: 1,
@@ -217,114 +241,126 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   errorText: {
-    color: '#888',
-    fontSize: 16,
+    color: COLORS.textSecondary,
+    fontSize: FONTS.lg,
   },
   scrollContent: {
-    padding: 16,
+    padding: SPACING.md,
+    paddingBottom: SPACING.xxl,
   },
   headerCard: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    padding: 24,
+    borderRadius: RADIUS.xl,
+    padding: SPACING.xl,
     alignItems: 'center',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#4CAF50',
+    marginBottom: SPACING.md,
+    ...SHADOWS.lg,
   },
   headerIcon: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#1a3a1a',
+    backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: SPACING.md,
   },
   name: {
-    fontSize: 24,
+    fontSize: FONTS.xxl,
     fontWeight: 'bold',
     color: '#fff',
-    marginBottom: 4,
+    marginBottom: SPACING.sm,
   },
-  category: {
-    fontSize: 16,
-    color: '#888',
-    marginBottom: 16,
+  categoryBadge: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs,
+    borderRadius: RADIUS.full,
+    marginBottom: SPACING.md,
+  },
+  categoryText: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: FONTS.sm,
+    fontWeight: '500',
   },
   priceContainer: {
     alignItems: 'center',
   },
   price: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#4CAF50',
-  },
-  cycle: {
-    fontSize: 14,
-    color: '#888',
-    marginTop: 4,
-  },
-  detailsCard: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 18,
+    fontSize: FONTS.display,
     fontWeight: 'bold',
     color: '#fff',
-    marginBottom: 16,
+  },
+  cycle: {
+    fontSize: FONTS.md,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: SPACING.xs,
+  },
+  detailsCard: {
+    marginBottom: SPACING.md,
+  },
+  sectionTitle: {
+    fontSize: FONTS.lg,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginBottom: SPACING.md,
   },
   detailRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingVertical: 12,
+    paddingVertical: SPACING.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: COLORS.border,
+  },
+  detailIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: RADIUS.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   detailContent: {
-    marginLeft: 12,
+    marginLeft: SPACING.md,
     flex: 1,
   },
   detailLabel: {
-    fontSize: 12,
-    color: '#888',
+    fontSize: FONTS.sm,
+    color: COLORS.textMuted,
     marginBottom: 2,
   },
   detailValue: {
-    fontSize: 16,
-    color: '#fff',
+    fontSize: FONTS.md,
+    color: COLORS.textPrimary,
+    fontWeight: '500',
   },
   cancelUrlButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    padding: 16,
-    backgroundColor: '#2196F3',
-    borderRadius: 12,
-    marginBottom: 12,
+    gap: SPACING.sm,
+    padding: SPACING.md,
+    borderRadius: RADIUS.lg,
+    marginBottom: SPACING.md,
+    ...SHADOWS.md,
   },
   cancelUrlText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: FONTS.md,
     fontWeight: 'bold',
   },
   deleteButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    padding: 16,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
+    gap: SPACING.sm,
+    padding: SPACING.md,
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg,
     borderWidth: 1,
-    borderColor: '#f44336',
+    borderColor: COLORS.error,
   },
   deleteButtonText: {
-    color: '#f44336',
-    fontSize: 16,
+    color: COLORS.error,
+    fontSize: FONTS.md,
+    fontWeight: '500',
   },
 });
