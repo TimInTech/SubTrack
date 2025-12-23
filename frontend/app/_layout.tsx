@@ -1,7 +1,10 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import { View, StyleSheet, Platform } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { COLORS } from '../src/constants/theme';
 
 export default function RootLayout() {
   return (
@@ -9,26 +12,29 @@ export default function RootLayout() {
       <StatusBar style="light" />
       <Tabs
         screenOptions={{
-          tabBarActiveTintColor: '#4CAF50',
-          tabBarInactiveTintColor: '#888',
+          tabBarActiveTintColor: COLORS.primary,
+          tabBarInactiveTintColor: COLORS.textMuted,
           tabBarStyle: {
-            backgroundColor: '#1a1a1a',
-            borderTopColor: '#333',
-            paddingBottom: 8,
+            backgroundColor: COLORS.surface,
+            borderTopColor: COLORS.border,
+            borderTopWidth: 1,
+            paddingBottom: Platform.OS === 'ios' ? 24 : 8,
             paddingTop: 8,
-            height: 70,
+            height: Platform.OS === 'ios' ? 88 : 70,
           },
           tabBarLabelStyle: {
             fontSize: 12,
             fontWeight: '600',
           },
           headerStyle: {
-            backgroundColor: '#1a1a1a',
+            backgroundColor: COLORS.background,
           },
-          headerTintColor: '#fff',
+          headerTintColor: COLORS.textPrimary,
           headerTitleStyle: {
             fontWeight: 'bold',
+            fontSize: 18,
           },
+          headerShadowVisible: false,
         }}
       >
         <Tabs.Screen
@@ -36,7 +42,7 @@ export default function RootLayout() {
           options={{
             title: 'Übersicht',
             tabBarIcon: ({ color, size }) => (
-              <Ionicons name="stats-chart" size={size} color={color} />
+              <MaterialCommunityIcons name="view-dashboard" size={size} color={color} />
             ),
           }}
         />
@@ -45,7 +51,7 @@ export default function RootLayout() {
           options={{
             title: 'Abos',
             tabBarIcon: ({ color, size }) => (
-              <Ionicons name="card" size={size} color={color} />
+              <MaterialCommunityIcons name="credit-card-multiple" size={size} color={color} />
             ),
           }}
         />
@@ -54,7 +60,7 @@ export default function RootLayout() {
           options={{
             title: 'Fixkosten',
             tabBarIcon: ({ color, size }) => (
-              <Ionicons name="wallet" size={size} color={color} />
+              <MaterialCommunityIcons name="wallet" size={size} color={color} />
             ),
           }}
         />

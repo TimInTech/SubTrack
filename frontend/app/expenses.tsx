@@ -13,41 +13,23 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Picker } from '@react-native-picker/picker';
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
-
-interface Expense {
-  id: string;
-  name: string;
-  category: string;
-  amount_cents: number;
-  billing_cycle: 'MONTHLY' | 'YEARLY';
-  notes?: string;
-}
-
-const formatCurrency = (cents: number): string => {
-  return (cents / 100).toFixed(2).replace('.', ',') + ' €';
-};
-
-const CATEGORIES = [
-  'Wohnen',
-  'Versicherung',
-  'Kommunikation',
-  'Mobilität',
-  'Gesundheit',
-  'Bildung',
-  'Sonstiges',
-];
+import { COLORS, SPACING, RADIUS, FONTS, SHADOWS } from '../src/constants/theme';
+import { GlassCard, FAB } from '../src/components/ui';
+import { useExpenses } from '../src/hooks/useApi';
+import { formatCurrency, getBillingCycleShort } from '../src/utils/format';
+import { EXPENSE_CATEGORIES } from '../src/constants/presets';
+import { Expense, BillingCycle } from '../src/types';
 
 export default function ExpensesScreen() {
   const router = useRouter();
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { expenses, loading, fetch, create, update, remove, setLoading } = useExpenses();
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -56,34 +38,21 @@ export default function ExpensesScreen() {
   const [name, setName] = useState('');
   const [category, setCategory] = useState('Wohnen');
   const [amount, setAmount] = useState('');
-  const [billingCycle, setBillingCycle] = useState<'MONTHLY' | 'YEARLY'>('MONTHLY');
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>('MONTHLY');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
-
-  const fetchExpenses = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/expenses`);
-      if (response.ok) {
-        const data = await response.json();
-        setExpenses(data);
-      }
-    } catch (error) {
-      console.error('Fehler beim Laden:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+  const [showCategories, setShowCategories] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
-      fetchExpenses();
-    }, [])
+      fetch();
+    }, [fetch])
   );
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
-    fetchExpenses();
+    await fetch();
+    setRefreshing(false);
   };
 
   const resetForm = () => {
@@ -134,97 +103,100 @@ export default function ExpensesScreen() {
       category,
       amount_cents: amountCents,
       billing_cycle: billingCycle,
-      notes: notes.trim() || null,
+      notes: notes.trim() || undefined,
     };
 
-    try {
-      const url = editingId
-        ? `${API_URL}/api/expenses/${editingId}`
-        : `${API_URL}/api/expenses`;
-      const method = editingId ? 'PUT' : 'POST';
-
-      const response = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (response.ok) {
-        setModalVisible(false);
-        resetForm();
-        fetchExpenses();
-      } else {
-        const error = await response.json();
-        Alert.alert('Fehler', error.detail || 'Speichern fehlgeschlagen.');
-      }
-    } catch (error) {
-      Alert.alert('Fehler', 'Verbindungsfehler beim Speichern.');
-    } finally {
-      setSaving(false);
+    let success = false;
+    if (editingId) {
+      success = await update(editingId, payload);
+    } else {
+      success = await create(payload);
     }
+
+    if (success) {
+      setModalVisible(false);
+      resetForm();
+    }
+    setSaving(false);
   };
 
-  const deleteExpense = (id: string, name: string) => {
+  const deleteExpense = (id: string, itemName: string) => {
     Alert.alert(
       'Fixkosten löschen',
-      `Möchten Sie "${name}" wirklich löschen?`,
+      `Möchten Sie "${itemName}" wirklich löschen?`,
       [
         { text: 'Abbrechen', style: 'cancel' },
         {
           text: 'Löschen',
           style: 'destructive',
-          onPress: async () => {
-            try {
-              const response = await fetch(`${API_URL}/api/expenses/${id}`, {
-                method: 'DELETE',
-              });
-              if (response.ok) {
-                fetchExpenses();
-              }
-            } catch (error) {
-              Alert.alert('Fehler', 'Löschen fehlgeschlagen.');
-            }
-          },
+          onPress: () => remove(id),
         },
       ]
     );
   };
 
-  const renderItem = ({ item }: { item: Expense }) => (
-    <TouchableOpacity
-      style={styles.itemCard}
-      onPress={() => router.push(`/expense/${item.id}`)}
-      onLongPress={() => deleteExpense(item.id, item.name)}
-    >
-      <View style={styles.itemHeader}>
-        <View style={styles.itemInfo}>
-          <Text style={styles.itemName}>{item.name}</Text>
-          <Text style={styles.itemCategory}>{item.category}</Text>
-        </View>
-        <View style={styles.itemAmount}>
-          <Text style={styles.amountValue}>{formatCurrency(item.amount_cents)}</Text>
-          <Text style={styles.amountCycle}>
-            {item.billing_cycle === 'MONTHLY' ? '/Monat' : '/Jahr'}
-          </Text>
-        </View>
-      </View>
-      <View style={styles.itemFooter}>
-        <TouchableOpacity
-          style={styles.editButton}
-          onPress={() => openEditModal(item)}
+  const getCategoryIcon = (cat: string): string => {
+    switch (cat) {
+      case 'Wohnen': return 'home';
+      case 'Versicherung': return 'shield-check';
+      case 'Kommunikation': return 'phone';
+      case 'Mobilität': return 'car';
+      case 'Gesundheit': return 'heart-pulse';
+      case 'Bildung': return 'school';
+      default: return 'wallet';
+    }
+  };
+
+  const renderItem = ({ item, index }: { item: Expense; index: number }) => (
+    <Animated.View>
+      <TouchableOpacity
+        style={styles.itemCard}
+        onPress={() => router.push(`/expense/${item.id}`)}
+        onLongPress={() => deleteExpense(item.id, item.name)}
+        activeOpacity={0.8}
+      >
+        <LinearGradient
+          colors={[COLORS.surface, COLORS.surfaceLight]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.itemGradient}
         >
-          <Ionicons name="pencil" size={16} color="#FF9800" />
-          <Text style={styles.editButtonText}>Bearbeiten</Text>
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
+          <View style={styles.itemHeader}>
+            <View style={[styles.itemIcon, { backgroundColor: `${COLORS.accent}20` }]}>
+              <MaterialCommunityIcons
+                name={getCategoryIcon(item.category) as any}
+                size={24}
+                color={COLORS.accent}
+              />
+            </View>
+            <View style={styles.itemInfo}>
+              <Text style={styles.itemName}>{item.name}</Text>
+              <Text style={styles.itemCategory}>{item.category}</Text>
+            </View>
+            <View style={styles.itemAmount}>
+              <Text style={styles.amountValue}>{formatCurrency(item.amount_cents)}</Text>
+              <Text style={styles.amountCycle}>{getBillingCycleShort(item.billing_cycle)}</Text>
+            </View>
+          </View>
+          <View style={styles.itemFooter}>
+            <TouchableOpacity
+              style={styles.editButton}
+              onPress={() => openEditModal(item)}
+            >
+              <MaterialCommunityIcons name="pencil" size={16} color={COLORS.accent} />
+              <Text style={styles.editButtonText}>Bearbeiten</Text>
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+      </TouchableOpacity>
+    </Animated.View>
   );
 
-  if (loading) {
+  if (loading && !refreshing) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#FF9800" />
+          <ActivityIndicator size="large" color={COLORS.accent} />
         </View>
       </SafeAreaView>
     );
@@ -234,7 +206,12 @@ export default function ExpensesScreen() {
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
       {expenses.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Ionicons name="wallet-outline" size={64} color="#333" />
+          <LinearGradient
+            colors={COLORS.gradientOrange as [string, string]}
+            style={styles.emptyIcon}
+          >
+            <MaterialCommunityIcons name="wallet-plus" size={48} color="#fff" />
+          </LinearGradient>
           <Text style={styles.emptyText}>Keine Fixkosten</Text>
           <Text style={styles.emptySubtext}>Tippen Sie auf + um Fixkosten hinzuzufügen</Text>
         </View>
@@ -244,20 +221,19 @@ export default function ExpensesScreen() {
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#FF9800"
+              tintColor={COLORS.accent}
             />
           }
         />
       )}
 
       {/* FAB */}
-      <TouchableOpacity style={styles.fab} onPress={openAddModal}>
-        <Ionicons name="add" size={28} color="#fff" />
-      </TouchableOpacity>
+      <FAB onPress={openAddModal} icon="plus" gradient={COLORS.gradientOrange} />
 
       {/* Add/Edit Modal */}
       <Modal
@@ -284,29 +260,66 @@ export default function ExpensesScreen() {
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.formContainer}>
+          <ScrollView style={styles.formContainer} showsVerticalScrollIndicator={false}>
             <Text style={styles.label}>Name *</Text>
             <TextInput
               style={styles.input}
               value={name}
               onChangeText={setName}
               placeholder="z.B. Miete"
-              placeholderTextColor="#666"
+              placeholderTextColor={COLORS.textMuted}
             />
 
             <Text style={styles.label}>Kategorie</Text>
-            <View style={styles.pickerContainer}>
-              <Picker
-                selectedValue={category}
-                onValueChange={setCategory}
-                style={styles.picker}
-                dropdownIconColor="#fff"
-              >
-                {CATEGORIES.map((cat) => (
-                  <Picker.Item key={cat} label={cat} value={cat} color="#fff" />
+            <TouchableOpacity
+              style={styles.pickerButton}
+              onPress={() => setShowCategories(!showCategories)}
+            >
+              <View style={styles.pickerButtonContent}>
+                <MaterialCommunityIcons
+                  name={getCategoryIcon(category) as any}
+                  size={20}
+                  color={COLORS.accent}
+                />
+                <Text style={styles.pickerButtonText}>{category}</Text>
+              </View>
+              <MaterialCommunityIcons
+                name={showCategories ? 'chevron-up' : 'chevron-down'}
+                size={24}
+                color={COLORS.textSecondary}
+              />
+            </TouchableOpacity>
+            {showCategories && (
+              <View style={styles.categoriesList}>
+                {EXPENSE_CATEGORIES.map((cat) => (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[
+                      styles.categoryItem,
+                      category === cat && styles.categoryItemActive,
+                    ]}
+                    onPress={() => {
+                      setCategory(cat);
+                      setShowCategories(false);
+                    }}
+                  >
+                    <MaterialCommunityIcons
+                      name={getCategoryIcon(cat) as any}
+                      size={20}
+                      color={category === cat ? COLORS.accent : COLORS.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.categoryItemText,
+                        category === cat && styles.categoryItemTextActive,
+                      ]}
+                    >
+                      {cat}
+                    </Text>
+                  </TouchableOpacity>
                 ))}
-              </Picker>
-            </View>
+              </View>
+            )}
 
             <Text style={styles.label}>Betrag (EUR) *</Text>
             <TextInput
@@ -314,7 +327,7 @@ export default function ExpensesScreen() {
               value={amount}
               onChangeText={setAmount}
               placeholder="z.B. 850,00"
-              placeholderTextColor="#666"
+              placeholderTextColor={COLORS.textMuted}
               keyboardType="decimal-pad"
             />
 
@@ -360,10 +373,12 @@ export default function ExpensesScreen() {
               value={notes}
               onChangeText={setNotes}
               placeholder="Optionale Notizen..."
-              placeholderTextColor="#666"
+              placeholderTextColor={COLORS.textMuted}
               multiline
               numberOfLines={3}
             />
+
+            <View style={{ height: 40 }} />
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
@@ -374,7 +389,7 @@ export default function ExpensesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0c0c0c',
+    backgroundColor: COLORS.background,
   },
   loadingContainer: {
     flex: 1,
@@ -385,178 +400,219 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 32,
+    padding: SPACING.xl,
+  },
+  emptyIcon: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.lg,
   },
   emptyText: {
-    color: '#888',
-    fontSize: 18,
-    marginTop: 16,
+    color: COLORS.textSecondary,
+    fontSize: FONTS.xl,
+    fontWeight: '600',
   },
   emptySubtext: {
-    color: '#666',
-    fontSize: 14,
-    marginTop: 8,
+    color: COLORS.textMuted,
+    fontSize: FONTS.md,
+    marginTop: SPACING.sm,
+    textAlign: 'center',
   },
   listContent: {
-    padding: 16,
-    paddingBottom: 100,
+    padding: SPACING.md,
+    paddingBottom: 120,
   },
   itemCard: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    marginBottom: SPACING.md,
+    borderRadius: RADIUS.lg,
+    overflow: 'hidden',
+    ...SHADOWS.md,
+  },
+  itemGradient: {
+    padding: SPACING.md,
+    borderRadius: RADIUS.lg,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: COLORS.border,
   },
   itemHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+  },
+  itemIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: RADIUS.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.md,
   },
   itemInfo: {
     flex: 1,
   },
   itemName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: FONTS.lg,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
   },
   itemCategory: {
-    fontSize: 14,
-    color: '#888',
-    marginTop: 4,
+    fontSize: FONTS.sm,
+    color: COLORS.textSecondary,
+    marginTop: 2,
   },
   itemAmount: {
     alignItems: 'flex-end',
   },
   amountValue: {
-    fontSize: 18,
+    fontSize: FONTS.xl,
     fontWeight: 'bold',
-    color: '#FF9800',
+    color: COLORS.accent,
   },
   amountCycle: {
-    fontSize: 12,
-    color: '#888',
+    fontSize: FONTS.xs,
+    color: COLORS.textMuted,
   },
   itemFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: SPACING.md,
+    paddingTop: SPACING.md,
     borderTopWidth: 1,
-    borderTopColor: '#333',
+    borderTopColor: COLORS.border,
   },
   editButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: SPACING.xs,
   },
   editButtonText: {
-    color: '#FF9800',
-    fontSize: 14,
-  },
-  fab: {
-    position: 'absolute',
-    right: 20,
-    bottom: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#FF9800',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
+    color: COLORS.accent,
+    fontSize: FONTS.sm,
+    fontWeight: '500',
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#0c0c0c',
+    backgroundColor: COLORS.background,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    padding: SPACING.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: COLORS.border,
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: FONTS.lg,
     fontWeight: 'bold',
-    color: '#fff',
+    color: COLORS.textPrimary,
   },
   cancelButton: {
-    color: '#888',
-    fontSize: 16,
+    color: COLORS.textSecondary,
+    fontSize: FONTS.md,
   },
   saveButton: {
-    color: '#FF9800',
-    fontSize: 16,
+    color: COLORS.accent,
+    fontSize: FONTS.md,
     fontWeight: 'bold',
   },
   saveButtonDisabled: {
-    color: '#666',
+    color: COLORS.textMuted,
   },
   formContainer: {
-    padding: 16,
+    padding: SPACING.md,
   },
   label: {
-    color: '#888',
-    fontSize: 14,
-    marginBottom: 8,
-    marginTop: 16,
+    color: COLORS.textSecondary,
+    fontSize: FONTS.sm,
+    marginBottom: SPACING.sm,
+    marginTop: SPACING.md,
   },
   input: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 8,
-    padding: 14,
-    color: '#fff',
-    fontSize: 16,
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.md,
+    padding: SPACING.md,
+    color: COLORS.textPrimary,
+    fontSize: FONTS.md,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: COLORS.border,
   },
   textArea: {
     height: 80,
     textAlignVertical: 'top',
   },
-  pickerContainer: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 8,
+  pickerButton: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.md,
+    padding: SPACING.md,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: COLORS.border,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  pickerButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  pickerButtonText: {
+    color: COLORS.textPrimary,
+    fontSize: FONTS.md,
+  },
+  categoriesList: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.md,
+    marginTop: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     overflow: 'hidden',
   },
-  picker: {
-    color: '#fff',
+  categoryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+    padding: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  categoryItemActive: {
+    backgroundColor: `${COLORS.accent}15`,
+  },
+  categoryItemText: {
+    color: COLORS.textPrimary,
+    fontSize: FONTS.md,
+  },
+  categoryItemTextActive: {
+    color: COLORS.accent,
+    fontWeight: '600',
   },
   cycleContainer: {
     flexDirection: 'row',
-    gap: 12,
+    gap: SPACING.md,
   },
   cycleButton: {
     flex: 1,
-    padding: 14,
-    borderRadius: 8,
-    backgroundColor: '#1a1a1a',
+    padding: SPACING.md,
+    borderRadius: RADIUS.md,
+    backgroundColor: COLORS.surface,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: COLORS.border,
     alignItems: 'center',
   },
   cycleButtonActive: {
-    borderColor: '#FF9800',
-    backgroundColor: '#3a2a1a',
+    borderColor: COLORS.accent,
+    backgroundColor: `${COLORS.accent}15`,
   },
   cycleButtonText: {
-    color: '#888',
-    fontSize: 16,
+    color: COLORS.textSecondary,
+    fontSize: FONTS.md,
   },
   cycleButtonTextActive: {
-    color: '#FF9800',
+    color: COLORS.accent,
     fontWeight: 'bold',
   },
 });

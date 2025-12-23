@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,58 +8,58 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  Animated,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from 'expo-router';
+import { PieChart } from 'react-native-gifted-charts';
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+import { COLORS, SPACING, RADIUS, FONTS, SHADOWS } from '../src/constants/theme';
+import { GlassCard, AnimatedNumber, ProgressBar } from '../src/components/ui';
+import { useDashboard } from '../src/hooks/useApi';
+import { formatCurrency } from '../src/utils/format';
 
-interface DashboardData {
-  monthly_subscriptions: number;
-  monthly_expenses: number;
-  total_monthly: number;
-  yearly_total: number;
-  subscription_count: number;
-  expense_count: number;
-}
-
-const formatCurrency = (cents: number): string => {
-  return (cents / 100).toFixed(2).replace('.', ',') + ' €';
-};
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function DashboardScreen() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const { data, loading, fetch, loadDemoData, setLoading } = useDashboard();
+  const [refreshing, setRefreshing] = React.useState(false);
+  
+  // Animations
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
 
-  const fetchDashboard = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/dashboard`);
-      if (response.ok) {
-        const dashboardData = await response.json();
-        setData(dashboardData);
-      }
-    } catch (error) {
-      console.error('Fehler beim Laden:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [fadeAnim, slideAnim]);
 
   useFocusEffect(
     useCallback(() => {
-      fetchDashboard();
-    }, [])
+      fetch();
+    }, [fetch])
   );
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
-    fetchDashboard();
+    await fetch();
+    setRefreshing(false);
   };
 
-  const loadDemoData = async () => {
+  const handleLoadDemoData = () => {
     Alert.alert(
       'Demo-Daten laden',
       'Möchten Sie Demo-Daten anlegen? Bestehende Daten werden gelöscht.',
@@ -68,18 +68,11 @@ export default function DashboardScreen() {
         {
           text: 'Laden',
           onPress: async () => {
-            try {
-              setLoading(true);
-              const response = await fetch(`${API_URL}/api/demo-data`, {
-                method: 'POST',
-              });
-              if (response.ok) {
-                Alert.alert('Erfolg', 'Demo-Daten wurden angelegt!');
-                fetchDashboard();
-              }
-            } catch (error) {
+            const success = await loadDemoData();
+            if (success) {
+              Alert.alert('Erfolg', 'Demo-Daten wurden angelegt!');
+            } else {
               Alert.alert('Fehler', 'Demo-Daten konnten nicht geladen werden.');
-              setLoading(false);
             }
           },
         },
@@ -87,11 +80,37 @@ export default function DashboardScreen() {
     );
   };
 
+  // Calculate chart data
+  const chartData = React.useMemo(() => {
+    if (!data) return [];
+    const total = data.monthly_subscriptions + data.monthly_expenses;
+    if (total === 0) return [];
+    
+    return [
+      {
+        value: data.monthly_subscriptions,
+        color: COLORS.primary,
+        text: `${Math.round((data.monthly_subscriptions / total) * 100)}%`,
+        label: 'Abos',
+      },
+      {
+        value: data.monthly_expenses,
+        color: COLORS.accent,
+        text: `${Math.round((data.monthly_expenses / total) * 100)}%`,
+        label: 'Fixkosten',
+      },
+    ];
+  }, [data]);
+
+  // Budget progress (example: 2000€ monthly budget)
+  const MONTHLY_BUDGET = 200000; // 2000€ in cents
+  const budgetProgress = data ? Math.min((data.total_monthly / MONTHLY_BUDGET) * 100, 100) : 0;
+
   if (loading && !refreshing) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#4CAF50" />
+          <ActivityIndicator size="large" color={COLORS.primary} />
           <Text style={styles.loadingText}>Lade Daten...</Text>
         </View>
       </SafeAreaView>
@@ -102,72 +121,161 @@ export default function DashboardScreen() {
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor="#4CAF50"
+            tintColor={COLORS.primary}
           />
         }
       >
-        <Text style={styles.header}>Dieser Monat</Text>
+        <Animated.View
+          style={[
+            styles.content,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }],
+            },
+          ]}
+        >
+          {/* Header */}
+          <View style={styles.header}>
+            <Text style={styles.greeting}>Dieser Monat</Text>
+            <Text style={styles.subtitle}>
+              {new Date().toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })}
+            </Text>
+          </View>
 
-        {/* Summary Cards */}
-        <View style={styles.cardContainer}>
-          <View style={[styles.card, styles.subscriptionCard]}>
-            <View style={styles.cardIcon}>
-              <Ionicons name="card" size={28} color="#4CAF50" />
+          {/* Main Total Card */}
+          <LinearGradient
+            colors={COLORS.gradientPurple as [string, string]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.totalCard}
+          >
+            <View style={styles.totalCardContent}>
+              <Text style={styles.totalLabel}>Gesamtausgaben</Text>
+              <AnimatedNumber
+                value={data?.total_monthly || 0}
+                style={styles.totalValue}
+                duration={1200}
+              />
+              <View style={styles.totalStats}>
+                <View style={styles.totalStatItem}>
+                  <MaterialCommunityIcons name="credit-card" size={16} color="rgba(255,255,255,0.8)" />
+                  <Text style={styles.totalStatText}>{data?.subscription_count || 0} Abos</Text>
+                </View>
+                <View style={styles.totalStatItem}>
+                  <MaterialCommunityIcons name="wallet" size={16} color="rgba(255,255,255,0.8)" />
+                  <Text style={styles.totalStatText}>{data?.expense_count || 0} Fixkosten</Text>
+                </View>
+              </View>
             </View>
-            <Text style={styles.cardLabel}>Abonnements</Text>
-            <Text style={styles.cardValue}>
-              {data ? formatCurrency(data.monthly_subscriptions) : '0,00 €'}
-            </Text>
-            <Text style={styles.cardCount}>
-              {data?.subscription_count || 0} Abos
-            </Text>
-          </View>
-
-          <View style={[styles.card, styles.expenseCard]}>
-            <View style={styles.cardIcon}>
-              <Ionicons name="wallet" size={28} color="#FF9800" />
+            <View style={styles.totalCardIcon}>
+              <MaterialCommunityIcons name="chart-arc" size={80} color="rgba(255,255,255,0.15)" />
             </View>
-            <Text style={styles.cardLabel}>Fixkosten</Text>
-            <Text style={styles.cardValue}>
-              {data ? formatCurrency(data.monthly_expenses) : '0,00 €'}
-            </Text>
-            <Text style={styles.cardCount}>
-              {data?.expense_count || 0} Posten
-            </Text>
+          </LinearGradient>
+
+          {/* Stats Cards Row */}
+          <View style={styles.statsRow}>
+            <GlassCard style={styles.statCard} borderColor={COLORS.primary}>
+              <View style={[styles.statIcon, { backgroundColor: `${COLORS.primary}20` }]}>
+                <MaterialCommunityIcons name="credit-card-multiple" size={24} color={COLORS.primary} />
+              </View>
+              <Text style={styles.statLabel}>Abonnements</Text>
+              <AnimatedNumber
+                value={data?.monthly_subscriptions || 0}
+                style={[styles.statValue, { color: COLORS.primary }]}
+                duration={1000}
+              />
+            </GlassCard>
+
+            <GlassCard style={styles.statCard} borderColor={COLORS.accent}>
+              <View style={[styles.statIcon, { backgroundColor: `${COLORS.accent}20` }]}>
+                <MaterialCommunityIcons name="home-city" size={24} color={COLORS.accent} />
+              </View>
+              <Text style={styles.statLabel}>Fixkosten</Text>
+              <AnimatedNumber
+                value={data?.monthly_expenses || 0}
+                style={[styles.statValue, { color: COLORS.accent }]}
+                duration={1000}
+              />
+            </GlassCard>
           </View>
-        </View>
 
-        {/* Total Monthly */}
-        <View style={styles.totalCard}>
-          <Text style={styles.totalLabel}>Gesamt pro Monat</Text>
-          <Text style={styles.totalValue}>
-            {data ? formatCurrency(data.total_monthly) : '0,00 €'}
-          </Text>
-        </View>
+          {/* Chart Section */}
+          {chartData.length > 0 && (
+            <GlassCard style={styles.chartCard}>
+              <Text style={styles.sectionTitle}>Kostenverteilung</Text>
+              <View style={styles.chartContainer}>
+                <PieChart
+                  data={chartData}
+                  donut
+                  radius={70}
+                  innerRadius={50}
+                  centerLabelComponent={() => (
+                    <View style={styles.chartCenter}>
+                      <MaterialCommunityIcons name="percent" size={20} color={COLORS.textSecondary} />
+                    </View>
+                  )}
+                />
+                <View style={styles.chartLegend}>
+                  {chartData.map((item, index) => (
+                    <View key={index} style={styles.legendItem}>
+                      <View style={[styles.legendDot, { backgroundColor: item.color }]} />
+                      <Text style={styles.legendLabel}>{item.label}</Text>
+                      <Text style={styles.legendValue}>{item.text}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            </GlassCard>
+          )}
 
-        {/* Yearly Projection */}
-        <View style={styles.yearlyCard}>
-          <View style={styles.yearlyHeader}>
-            <Ionicons name="calendar" size={24} color="#2196F3" />
-            <Text style={styles.yearlyLabel}>Hochrechnung pro Jahr</Text>
-          </View>
-          <Text style={styles.yearlyValue}>
-            {data ? formatCurrency(data.yearly_total) : '0,00 €'}
-          </Text>
-          <Text style={styles.yearlyNote}>
-            Monatliche Kosten × 12 + jährliche Posten
-          </Text>
-        </View>
+          {/* Budget Progress */}
+          <GlassCard style={styles.budgetCard}>
+            <View style={styles.budgetHeader}>
+              <MaterialCommunityIcons name="target" size={24} color={COLORS.secondary} />
+              <Text style={styles.sectionTitle}>Monatsbudget</Text>
+            </View>
+            <ProgressBar
+              progress={budgetProgress}
+              label="Verbraucht"
+              value={formatCurrency(data?.total_monthly || 0)}
+              gradient={budgetProgress > 80 ? COLORS.gradientOrange : COLORS.gradientCyan}
+              height={12}
+            />
+            <Text style={styles.budgetNote}>
+              von {formatCurrency(MONTHLY_BUDGET)} Budget
+            </Text>
+          </GlassCard>
 
-        {/* Demo Data Button */}
-        <TouchableOpacity style={styles.demoButton} onPress={loadDemoData}>
-          <Ionicons name="flask" size={20} color="#888" />
-          <Text style={styles.demoButtonText}>Demo-Daten anlegen</Text>
-        </TouchableOpacity>
+          {/* Yearly Projection */}
+          <GlassCard style={styles.yearlyCard} gradient={COLORS.gradientBlue}>
+            <View style={styles.yearlyContent}>
+              <View>
+                <View style={styles.yearlyHeader}>
+                  <MaterialCommunityIcons name="calendar-clock" size={24} color="#fff" />
+                  <Text style={styles.yearlyLabel}>Jahreshochrechnung</Text>
+                </View>
+                <AnimatedNumber
+                  value={data?.yearly_total || 0}
+                  style={styles.yearlyValue}
+                  duration={1500}
+                />
+                <Text style={styles.yearlyNote}>Monatlich × 12 + jährliche Posten</Text>
+              </View>
+              <MaterialCommunityIcons name="chart-timeline-variant" size={48} color="rgba(255,255,255,0.3)" />
+            </View>
+          </GlassCard>
+
+          {/* Demo Data Button */}
+          <TouchableOpacity style={styles.demoButton} onPress={handleLoadDemoData}>
+            <MaterialCommunityIcons name="flask-outline" size={20} color={COLORS.textMuted} />
+            <Text style={styles.demoButtonText}>Demo-Daten anlegen</Text>
+          </TouchableOpacity>
+        </Animated.View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -176,7 +284,7 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0c0c0c',
+    backgroundColor: COLORS.background,
   },
   loadingContainer: {
     flex: 1,
@@ -184,115 +292,194 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    color: '#888',
-    marginTop: 12,
-    fontSize: 16,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.md,
+    fontSize: FONTS.lg,
   },
   scrollContent: {
-    padding: 16,
+    paddingBottom: SPACING.xxl,
+  },
+  content: {
+    padding: SPACING.md,
   },
   header: {
-    fontSize: 28,
+    marginBottom: SPACING.lg,
+  },
+  greeting: {
+    fontSize: FONTS.xxxl,
     fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 20,
+    color: COLORS.textPrimary,
   },
-  cardContainer: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
-  },
-  card: {
-    flex: 1,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-  },
-  subscriptionCard: {
-    borderColor: '#4CAF50',
-  },
-  expenseCard: {
-    borderColor: '#FF9800',
-  },
-  cardIcon: {
-    marginBottom: 12,
-  },
-  cardLabel: {
-    fontSize: 14,
-    color: '#888',
-    marginBottom: 4,
-  },
-  cardValue: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  cardCount: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 8,
+  subtitle: {
+    fontSize: FONTS.lg,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.xs,
+    textTransform: 'capitalize',
   },
   totalCard: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#4CAF50',
+    borderRadius: RADIUS.xl,
+    padding: SPACING.lg,
+    marginBottom: SPACING.md,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    overflow: 'hidden',
+    ...SHADOWS.lg,
+  },
+  totalCardContent: {
+    flex: 1,
+  },
+  totalCardIcon: {
+    position: 'absolute',
+    right: -10,
+    top: '50%',
+    marginTop: -40,
   },
   totalLabel: {
-    fontSize: 16,
-    color: '#888',
-    marginBottom: 8,
+    fontSize: FONTS.md,
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: SPACING.xs,
   },
   totalValue: {
-    fontSize: 36,
+    fontSize: FONTS.display,
     fontWeight: 'bold',
-    color: '#4CAF50',
+    color: '#fff',
+  },
+  totalStats: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+    marginTop: SPACING.md,
+  },
+  totalStatItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+  },
+  totalStatText: {
+    fontSize: FONTS.sm,
+    color: 'rgba(255,255,255,0.8)',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  statCard: {
+    flex: 1,
+  },
+  statIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: RADIUS.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+  },
+  statLabel: {
+    fontSize: FONTS.sm,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.xs,
+  },
+  statValue: {
+    fontSize: FONTS.xxl,
+    fontWeight: 'bold',
+  },
+  chartCard: {
+    marginBottom: SPACING.md,
+  },
+  sectionTitle: {
+    fontSize: FONTS.lg,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginBottom: SPACING.md,
+  },
+  chartContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+  },
+  chartCenter: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chartLegend: {
+    gap: SPACING.md,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  legendDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  legendLabel: {
+    fontSize: FONTS.md,
+    color: COLORS.textSecondary,
+    flex: 1,
+  },
+  legendValue: {
+    fontSize: FONTS.md,
+    color: COLORS.textPrimary,
+    fontWeight: '600',
+  },
+  budgetCard: {
+    marginBottom: SPACING.md,
+  },
+  budgetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginBottom: SPACING.md,
+  },
+  budgetNote: {
+    fontSize: FONTS.sm,
+    color: COLORS.textMuted,
+    marginTop: SPACING.sm,
+    textAlign: 'right',
   },
   yearlyCard: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#2196F3',
+    marginBottom: SPACING.lg,
+  },
+  yearlyContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   yearlyHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
+    gap: SPACING.sm,
+    marginBottom: SPACING.sm,
   },
   yearlyLabel: {
-    fontSize: 16,
-    color: '#888',
+    fontSize: FONTS.md,
+    color: 'rgba(255,255,255,0.9)',
   },
   yearlyValue: {
-    fontSize: 28,
+    fontSize: FONTS.xxxl,
     fontWeight: 'bold',
-    color: '#2196F3',
-    marginBottom: 8,
+    color: '#fff',
   },
   yearlyNote: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: FONTS.sm,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: SPACING.xs,
   },
   demoButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    padding: 16,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
+    gap: SPACING.sm,
+    padding: SPACING.md,
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.md,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: COLORS.border,
   },
   demoButtonText: {
-    color: '#888',
-    fontSize: 14,
+    color: COLORS.textMuted,
+    fontSize: FONTS.md,
   },
 });
