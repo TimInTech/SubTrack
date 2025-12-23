@@ -437,7 +437,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-around',
   },
-  chartCenter: {
+  chartWrapper: {
+    position: 'relative',
+    width: 140,
+    height: 140,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chartCenterOverlay: {
+    position: 'absolute',
     justifyContent: 'center',
     alignItems: 'center',
   },
