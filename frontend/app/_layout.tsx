@@ -2,8 +2,7 @@ import React from 'react';
 import { Tabs } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { View, StyleSheet, Platform } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Platform } from 'react-native';
 import { COLORS } from '../src/constants/theme';
 
 export default function RootLayout() {
@@ -23,7 +22,7 @@ export default function RootLayout() {
             height: Platform.OS === 'ios' ? 88 : 70,
           },
           tabBarLabelStyle: {
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: '600',
           },
           headerStyle: {
@@ -61,6 +60,15 @@ export default function RootLayout() {
             title: 'Fixkosten',
             tabBarIcon: ({ color, size }) => (
               <MaterialCommunityIcons name="wallet" size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="settings"
+          options={{
+            title: 'Einstellungen',
+            tabBarIcon: ({ color, size }) => (
+              <MaterialCommunityIcons name="cog" size={size} color={color} />
             ),
           }}
         />
