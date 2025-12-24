@@ -1,0 +1,122 @@
+name: Validate Expo Assets and Config
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/app.json'
+      - 'frontend/assets/**'
+      - 'frontend/package.json'
+      - 'frontend/yarn.lock'
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/app.json'
+      - 'frontend/assets/**'
+      - 'frontend/package.json'
+      - 'frontend/yarn.lock'
+
+jobs:
+  validate-assets:
+    name: Validate Assets and Configuration
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'yarn'
+          cache-dependency-path: 'frontend/yarn.lock'
+      
+      - name: Install dependencies
+        working-directory: frontend
+        run: yarn install --frozen-lockfile
+      
+      - name: Validate Expo config
+        working-directory: frontend
+        run: |
+          echo "Validating expo config..."
+          npx expo config --type public > /dev/null
+          echo "✅ Expo config is valid"
+      
+      - name: Check required assets exist
+        working-directory: frontend
+        run: |
+          echo "Checking required image assets..."
+          
+          # Check icon
+          if [ ! -f "assets/images/icon.png" ]; then
+            echo "❌ Missing: assets/images/icon.png"
+            exit 1
+          fi
+          echo "✅ Found: assets/images/icon.png"
+          
+          # Check adaptive icon
+          if [ ! -f "assets/images/adaptive-icon.png" ]; then
+            echo "❌ Missing: assets/images/adaptive-icon.png"
+            exit 1
+          fi
+          echo "✅ Found: assets/images/adaptive-icon.png"
+          
+          # Check splash icon
+          if [ ! -f "assets/images/splash-icon.png" ]; then
+            echo "❌ Missing: assets/images/splash-icon.png"
+            exit 1
+          fi
+          echo "✅ Found: assets/images/splash-icon.png"
+          
+          # Check favicon
+          if [ ! -f "assets/images/favicon.png" ]; then
+            echo "❌ Missing: assets/images/favicon.png"
+            exit 1
+          fi
+          echo "✅ Found: assets/images/favicon.png"
+          
+          echo "✅ All required assets exist"
+      
+      - name: Validate PNG files
+        working-directory: frontend
+        run: |
+          echo "Validating PNG files..."
+          
+          for png in assets/images/icon.png assets/images/adaptive-icon.png assets/images/splash-icon.png assets/images/favicon.png; do
+            if ! file "$png" | grep -q "PNG image data"; then
+              echo "❌ Invalid PNG: $png"
+              exit 1
+            fi
+            
+            # Check for Git LFS pointers
+            if head -c 100 "$png" | grep -q "version https://git-lfs.github.com"; then
+              echo "❌ Git LFS pointer detected in $png - file not downloaded"
+              exit 1
+            fi
+            
+            echo "✅ Valid PNG: $png"
+          done
+          
+          echo "✅ All PNG files are valid"
+      
+      - name: Check Node version
+        run: |
+          echo "Checking Node version..."
+          expected=$(cat .nvmrc)
+          actual=$(node --version | sed 's/v//')
+          
+          if [[ ! "$actual" =~ ^${expected%%.*}\. ]]; then
+            echo "❌ Node version mismatch. Expected: $expected, Got: $actual"
+            exit 1
+          fi
+          
+          echo "✅ Node version is correct: $actual"
+      
+      - name: Summary
+        run: |
+          echo "## ✅ All Checks Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- Expo configuration is valid" >> $GITHUB_STEP_SUMMARY
+          echo "- All required assets exist" >> $GITHUB_STEP_SUMMARY
+          echo "- All PNG files are valid" >> $GITHUB_STEP_SUMMARY
+          echo "- Node version is correct" >> $GITHUB_STEP_SUMMARY
