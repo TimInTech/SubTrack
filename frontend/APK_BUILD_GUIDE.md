@@ -2,6 +2,17 @@
 
 This guide explains how to build a debug APK locally for the SubTrack app.
 
+## Quick Start
+
+For a one-command build process:
+
+```bash
+cd frontend
+./scripts/build-debug-apk.sh
+```
+
+This automated script handles all steps from dependency installation to APK creation.
+
 ## Prerequisites
 
 - **Node.js**: v20.0.0 or higher (recommended: v20.19.6 LTS)
@@ -30,22 +41,31 @@ nvm use
 # or explicitly: nvm install 20.19.6 && nvm use 20.19.6
 ```
 
-### 2. Install Yarn
+### 2. Enable Corepack and Install Yarn
+
+We use Corepack to ensure the correct Yarn version (1.22.22) is used:
 
 ```bash
-npm install -g yarn@1.22.22
+cd frontend
+
+# Enable Corepack (built into Node.js 20+)
+corepack enable
+
+# Prepare and activate the exact Yarn version
+corepack prepare yarn@1.22.22 --activate
 ```
+
+**Note:** The exact Yarn version is specified in `package.json` via `packageManager` field and `engines.yarn`.
 
 ### 3. Install Dependencies
 
 From the `frontend` directory:
 
 ```bash
-cd frontend
-yarn install
+yarn install --frozen-lockfile
 ```
 
-This will install all dependencies as specified in `yarn.lock`.
+This will install all dependencies exactly as specified in `yarn.lock`, ensuring reproducible builds.
 
 ## Building the Debug APK
 
@@ -55,12 +75,15 @@ This will install all dependencies as specified in `yarn.lock`.
 export NODE_ENV=development
 ```
 
+**Important:** Setting `NODE_ENV=development` is required for proper asset handling during prebuild and Gradle build.
+
 ### Step 2: Run Expo Prebuild
 
 This generates native Android project files:
 
 ```bash
-npx expo prebuild -p android --clean
+cd frontend
+NODE_ENV=development npx expo prebuild -p android --clean
 ```
 
 **What this does:**
@@ -74,7 +97,7 @@ npx expo prebuild -p android --clean
 
 ```bash
 cd android
-./gradlew :app:assembleDebug
+NODE_ENV=development ./gradlew :app:assembleDebug
 ```
 
 **What this does:**
@@ -178,7 +201,25 @@ cd android
 
 ## Full Build Script
 
-Here's a complete script to build from scratch:
+For convenience, we provide an automated build script that performs all steps:
+
+```bash
+cd frontend
+./scripts/build-debug-apk.sh
+```
+
+This script will:
+1. Set `NODE_ENV=development`
+2. Install dependencies with `yarn install --frozen-lockfile`
+3. Run `npx expo prebuild -p android --clean`
+4. Build the APK with `./gradlew :app:assembleDebug`
+5. Verify the APK was created and show its location
+
+The script uses `set -euo pipefail` for proper error handling and will exit immediately if any step fails.
+
+### Manual Build (Step-by-Step)
+
+If you prefer to run the commands manually, here's the complete sequence:
 
 ```bash
 #!/bin/bash
@@ -192,16 +233,16 @@ export NODE_ENV=development
 
 # Install dependencies
 echo "Installing dependencies..."
-yarn install
+yarn install --frozen-lockfile
 
 # Prebuild native projects
 echo "Running expo prebuild..."
-npx expo prebuild -p android --clean
+NODE_ENV=development npx expo prebuild -p android --clean
 
 # Build APK
 echo "Building APK..."
 cd android
-./gradlew :app:assembleDebug
+NODE_ENV=development ./gradlew :app:assembleDebug
 
 # Show APK location
 echo "✅ Build successful!"
@@ -214,10 +255,68 @@ Save this as `build-apk.sh`, make it executable (`chmod +x build-apk.sh`), and r
 ## Continuous Integration
 
 For CI builds, ensure:
-1. Node.js 20 LTS is installed
+1. Node.js 20 LTS is installed (use `.nvmrc` to specify version)
 2. JDK 17 or 21 is available
 3. Android SDK is configured
-4. Use `yarn install --frozen-lockfile` for reproducible builds
+4. Use `corepack enable && corepack prepare yarn@1.22.22 --activate` to set up Yarn
+5. Use `yarn install --frozen-lockfile` for reproducible builds
+6. Set `NODE_ENV=development` for all build steps
+
+### Example CI Configuration (GitHub Actions)
+
+```yaml
+name: Build Android APK
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      
+      - name: Enable Corepack and set up Yarn
+        run: |
+          cd frontend
+          corepack enable
+          corepack prepare yarn@1.22.22 --activate
+      
+      - name: Install dependencies
+        run: |
+          cd frontend
+          yarn install --frozen-lockfile
+      
+      - name: Run Expo prebuild
+        run: |
+          cd frontend
+          NODE_ENV=development npx expo prebuild -p android --clean
+      
+      - name: Build debug APK
+        run: |
+          cd frontend/android
+          NODE_ENV=development ./gradlew :app:assembleDebug
+      
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
+```
 
 ## Additional Resources
 
