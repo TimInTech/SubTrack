@@ -14,7 +14,6 @@ readonly NC='\033[0m' # No Color
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-APK_PATH="$FRONTEND_DIR/android/app/build/outputs/apk/debug/app-debug.apk"
 
 echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}  SubTrack Android Debug APK Build Script${NC}"
@@ -67,8 +66,15 @@ echo ""
 
 # Verify APK was created
 echo -e "${YELLOW}➜${NC} Verifying APK..."
+APK_PATH="$FRONTEND_DIR/android/app/build/outputs/apk/debug/app-debug.apk"
 if [ -f "$APK_PATH" ]; then
-    APK_SIZE=$(ls -lh "$APK_PATH" | awk '{print $5}')
+    # Use stat for reliable file size retrieval
+    if command -v numfmt &> /dev/null; then
+        APK_SIZE=$(stat -c%s "$APK_PATH" | numfmt --to=iec-i --suffix=B)
+    else
+        # Fallback for systems without numfmt
+        APK_SIZE=$(stat -c%s "$APK_PATH" | awk '{printf "%.2f MB", $1/1024/1024}')
+    fi
     echo -e "${GREEN}✓${NC} APK successfully created!"
     echo ""
     echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
