@@ -17,7 +17,13 @@ We recommend using `nvm` (Node Version Manager) to manage Node.js versions:
 
 ```bash
 # Install nvm (if not already installed)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+# Official installation: https://github.com/nvm-sh/nvm#installing-and-updating
+# Alternatively, install via your package manager:
+# - macOS: brew install nvm
+# - Linux: Check your distribution's package manager
+
+# For direct installation (verify the latest version at https://github.com/nvm-sh/nvm):
+# curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
 
 # Use the pinned Node version
 nvm use

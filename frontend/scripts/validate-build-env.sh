@@ -57,12 +57,20 @@ if command -v node &> /dev/null; then
     echo -e "${GREEN}✅${NC} Node.js: $NODE_VERSION"
     
     # Check against .nvmrc if it exists
-    if [ -f "../.nvmrc" ]; then
-        REQUIRED_VERSION=$(cat ../.nvmrc)
-        if [[ "$NODE_VERSION" =~ ^v${REQUIRED_VERSION%%.*}\. ]]; then
-            echo -e "${GREEN}✅${NC} Node version matches .nvmrc requirement"
+    # Resolve the path relative to the script location
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    NVMRC_PATH="$SCRIPT_DIR/../../.nvmrc"
+    
+    if [ -f "$NVMRC_PATH" ]; then
+        REQUIRED_VERSION=$(cat "$NVMRC_PATH")
+        # Remove 'v' prefix from node version for comparison
+        NODE_VERSION_CLEAN="${NODE_VERSION#v}"
+        
+        if [[ "$NODE_VERSION_CLEAN" == "$REQUIRED_VERSION"* ]]; then
+            echo -e "${GREEN}✅${NC} Node version matches .nvmrc requirement ($REQUIRED_VERSION)"
         else
-            echo -e "${YELLOW}⚠️${NC}  Node version ($NODE_VERSION) doesn't match .nvmrc ($REQUIRED_VERSION)"
+            echo -e "${YELLOW}⚠️${NC}  Node version ($NODE_VERSION_CLEAN) doesn't match .nvmrc ($REQUIRED_VERSION)"
+            echo -e "${YELLOW}⚠️${NC}  Recommended: Use 'nvm use' or install Node.js $REQUIRED_VERSION"
         fi
     fi
 else

@@ -106,12 +106,13 @@ jobs:
           expected=$(cat .nvmrc)
           actual=$(node --version | sed 's/v//')
           
-          if [[ ! "$actual" =~ ^${expected%%.*}\. ]]; then
-            echo "❌ Node version mismatch. Expected: $expected, Got: $actual"
+          # Check if actual version starts with expected version (allows patch version differences)
+          if [[ "$actual" != "$expected"* ]]; then
+            echo "❌ Node version mismatch. Expected: $expected (or compatible), Got: $actual"
             exit 1
           fi
           
-          echo "✅ Node version is correct: $actual"
+          echo "✅ Node version is correct: $actual (expected: $expected)"
       
       - name: Summary
         run: |
