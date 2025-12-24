@@ -19,7 +19,8 @@
       "splash": {
         "image": "./assets/images/splash-icon.png"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.anonymous.frontend"
     },
     "web": {
       "bundler": "metro",
