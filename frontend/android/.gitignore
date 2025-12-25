@@ -14,3 +14,7 @@ local.properties
 
 # Bundle artifacts
 *.jsbundle
+
+# Build artifacts
+app/build.gradle.backup
+.claude/
