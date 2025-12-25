@@ -2,8 +2,9 @@
   "name": "abo-tracker",
   "main": "expo-router/entry",
   "version": "1.0.0",
+  "packageManager": "yarn@1.22.22",
   "engines": {
-    "node": ">=20.19.0 <21",
+    "node": "20.19.6",
     "yarn": "1.22.22"
   },
   "scripts": {
