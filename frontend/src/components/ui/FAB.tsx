@@ -41,9 +41,6 @@ export const FAB: React.FC<FABProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    position: 'absolute',
-    right: 20,
-    bottom: 20,
     ...SHADOWS.glow,
   },
   fab: {

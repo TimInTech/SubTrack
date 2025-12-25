@@ -595,6 +595,8 @@ const styles = StyleSheet.create({
     bottom: 20,
     alignItems: 'center',
     gap: SPACING.md,
+    zIndex: 1000,
+    elevation: 10,
   },
   presetFab: {
     width: 44,
