@@ -8,17 +8,22 @@ Eine Cross-Platform Mobile App zur Verwaltung von Abonnements und wiederkehrende
 - **Backend**: FastAPI (Python)
 - **Database**: MongoDB
 
+---
+
 ## Voraussetzungen
 
-- Node.js 20.19.0 (siehe `.nvmrc`)
-- Yarn 1.22.22
-- JDK 17 (für Android Build)
-- Android SDK mit:
-  - platform-tools
-  - platforms;android-35
-  - build-tools;35.0.0
+| Tool | Version |
+|------|---------|
+| Node.js | 20.19.6 |
+| Yarn | 1.22.22 |
+| JDK | 17 |
+| Android SDK | platforms;android-35, build-tools;35.0.0 |
 
-## Installation
+---
+
+## Fresh Install & Build Debug APK
+
+Folge diesen Schritten für einen sauberen Build von Grund auf:
 
 ### 1. Repository klonen
 
@@ -30,65 +35,32 @@ cd <repo-name>
 ### 2. Node Version setzen (mit nvm)
 
 ```bash
-nvm install
-nvm use
+nvm install 20.19.6
+nvm use 20.19.6
 ```
 
-### 3. Backend Setup
+### 3. Clean State (optional, bei Problemen)
 
 ```bash
-cd backend
-pip install -r requirements.txt
+cd frontend
+rm -rf node_modules android ios .expo
 ```
 
-### 4. Frontend Setup
+### 4. Dependencies installieren
 
 ```bash
 cd frontend
 yarn install --frozen-lockfile
 ```
 
-## Development Server starten
-
-### Backend
-
-```bash
-cd backend
-uvicorn server:app --reload --host 0.0.0.0 --port 8001
-```
-
-### Frontend (Expo)
-
-```bash
-cd frontend
-yarn start
-```
-
-## Android APK Build (Fresh Install)
-
-Wenn du eine frische Debug-APK bauen möchtest:
-
-### 1. Clean Build Environment
-
-```bash
-cd frontend
-rm -rf node_modules android
-```
-
-### 2. Dependencies installieren
-
-```bash
-yarn install --frozen-lockfile
-```
-
-### 3. Android Projekt generieren
+### 5. Android Projekt generieren (Expo Prebuild)
 
 ```bash
 export NODE_ENV=development
 npx expo prebuild --platform android --clean --no-install
 ```
 
-### 4. Debug APK bauen
+### 6. Debug APK bauen
 
 ```bash
 cd android
@@ -96,62 +68,93 @@ chmod +x ./gradlew
 ./gradlew :app:assembleDebug
 ```
 
-### 5. APK finden
+### 7. APK finden
 
-Die fertige APK liegt unter:
 ```
 frontend/android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+---
+
+## Development Server
+
+### Backend starten
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn server:app --reload --host 0.0.0.0 --port 8001
+```
+
+### Frontend (Expo Dev Server)
+
+```bash
+cd frontend
+yarn start
+```
+
+---
+
 ## GitHub Actions
 
-Bei jedem Push/PR wird automatisch eine Debug-APK gebaut und als Artifact hochgeladen.
-Siehe `.github/workflows/android.yml`.
+Bei jedem Push auf `main`, `master` oder `conflict_251225_1038` wird automatisch eine Debug-APK gebaut.
+
+- Workflow: `.github/workflows/android.yml`
+- Artifact: `app-debug-apk` (14 Tage Retention)
+
+---
 
 ## Features
 
-- ✅ Dashboard mit Monats-/Jahresübersicht
-- ✅ Abonnements verwalten (CRUD)
-- ✅ Fixkosten verwalten (CRUD)
-- ✅ Service-Presets (Netflix, Spotify, etc.)
-- ✅ Kostenverteilungs-Chart
-- ✅ JSON/CSV Export & Import
-- ✅ Benachrichtigungen vor Verlängerung
-- ✅ Einstellungen-Screen
+- Dashboard mit Monats-/Jahresübersicht
+- Abonnements verwalten (CRUD)
+- Fixkosten verwalten (CRUD)
+- Service-Presets (Netflix, Spotify, etc.)
+- Kostenverteilungs-Chart
+- JSON/CSV Export & Import
+- Benachrichtigungen vor Verlängerung
+- Einstellungen-Screen
+
+---
 
 ## Projektstruktur
 
 ```
 ├── backend/
-│   ├── server.py          # FastAPI Server
+│   ├── server.py
 │   └── requirements.txt
 ├── frontend/
-│   ├── app/               # Expo Router Pages
+│   ├── app/               # Expo Router Screens
 │   ├── src/
-│   │   ├── components/    # UI Komponenten
-│   │   ├── constants/     # Theme, Presets
-│   │   ├── hooks/         # Custom Hooks
-│   │   ├── types/         # TypeScript Types
-│   │   └── utils/         # Utility Functions
-│   ├── app.json           # Expo Config
+│   │   ├── components/
+│   │   ├── constants/
+│   │   ├── hooks/
+│   │   ├── types/
+│   │   └── utils/
+│   ├── app.json
 │   └── package.json
-└── .github/workflows/     # CI/CD
+└── .github/workflows/
+    └── android.yml
 ```
+
+---
 
 ## Troubleshooting
 
-### MainApplication.kt Fehler
+### MainApplication.kt unresolved references
 
-Stelle sicher, dass `newArchEnabled: false` in `app.json` gesetzt ist.
+Stelle sicher, dass `newArchEnabled: false` in `frontend/app.json` gesetzt ist.
 
 ### NODE_ENV Fehler
 
-Setze immer `export NODE_ENV=development` vor dem Prebuild.
+Setze immer `export NODE_ENV=development` vor dem Prebuild/Build.
 
 ### Gradle Build Fehler
 
-Lösche das Android-Verzeichnis und führe Prebuild erneut aus:
 ```bash
 rm -rf frontend/android
-cd frontend && npx expo prebuild -p android --clean --no-install
+cd frontend
+export NODE_ENV=development
+npx expo prebuild -p android --clean --no-install
+cd android && ./gradlew :app:assembleDebug
 ```
