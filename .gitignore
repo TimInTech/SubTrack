@@ -73,3 +73,7 @@ frontend/ios/build/
 
 # Cache
 .cache/
+-e 
+# Environment files
+*.env
+*.env.*
