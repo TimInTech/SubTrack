@@ -235,36 +235,38 @@ export default function SubscriptionsScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['left', 'right']}>
-      {subscriptions.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <LinearGradient
-            colors={COLORS.gradientPurple as [string, string]}
-            style={styles.emptyIcon}
-          >
-            <MaterialCommunityIcons name="credit-card-plus" size={48} color="#fff" />
-          </LinearGradient>
-          <Text style={styles.emptyText}>Keine Abonnements</Text>
-          <Text style={styles.emptySubtext}>Tippen Sie auf + um ein Abo hinzuzufügen</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={subscriptions}
-          renderItem={renderItem}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={COLORS.primary}
-            />
-          }
-        />
-      )}
+    <>
+      <SafeAreaView style={styles.container} edges={['left', 'right']}>
+        {subscriptions.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <LinearGradient
+              colors={COLORS.gradientPurple as [string, string]}
+              style={styles.emptyIcon}
+            >
+              <MaterialCommunityIcons name="credit-card-plus" size={48} color="#fff" />
+            </LinearGradient>
+            <Text style={styles.emptyText}>Keine Abonnements</Text>
+            <Text style={styles.emptySubtext}>Tippen Sie auf + um ein Abo hinzuzufügen</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={subscriptions}
+            renderItem={renderItem}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor={COLORS.primary}
+              />
+            }
+          />
+        )}
+      </SafeAreaView>
 
-      {/* FAB with two options */}
+      {/* FAB with two options - outside SafeAreaView */}
       <TouchableOpacity style={styles.presetFab} onPress={openPresetModal}>
         <MaterialCommunityIcons name="star" size={20} color={COLORS.primary} />
       </TouchableOpacity>
@@ -471,7 +473,7 @@ export default function SubscriptionsScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
-    </SafeAreaView>
+    </>
   );
 }
 
