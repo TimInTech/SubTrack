@@ -265,12 +265,10 @@ export default function SubscriptionsScreen() {
       )}
 
       {/* FAB with two options */}
-      <View style={styles.fabContainer}>
-        <TouchableOpacity style={styles.presetFab} onPress={openPresetModal}>
-          <MaterialCommunityIcons name="star" size={20} color={COLORS.primary} />
-        </TouchableOpacity>
-        <FAB onPress={openAddModal} icon="plus" />
-      </View>
+      <TouchableOpacity style={styles.presetFab} onPress={openPresetModal}>
+        <MaterialCommunityIcons name="star" size={20} color={COLORS.primary} />
+      </TouchableOpacity>
+      <FAB onPress={openAddModal} icon="plus" />
 
       {/* Preset Selection Modal */}
       <Modal
@@ -589,16 +587,10 @@ const styles = StyleSheet.create({
     padding: SPACING.sm,
     borderRadius: RADIUS.sm,
   },
-  fabContainer: {
+  presetFab: {
     position: 'absolute',
     right: 20,
-    bottom: 20,
-    alignItems: 'center',
-    gap: SPACING.md,
-    zIndex: 1000,
-    elevation: 10,
-  },
-  presetFab: {
+    bottom: 96,
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -607,6 +599,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.primary,
+    zIndex: 1001,
+    elevation: 11,
     ...SHADOWS.sm,
   },
   // Preset Modal
