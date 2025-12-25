@@ -1,8 +1,14 @@
 {
-  "name": "frontend",
+  "name": "abo-tracker",
   "main": "expo-router/entry",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=20.19.0 <21",
+    "yarn": "1.22.22"
+  },
   "scripts": {
+    "prebuild:android": "NODE_ENV=development expo prebuild --platform android --clean --no-install",
+    "build:android": "cd android && ./gradlew :app:assembleDebug",
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
