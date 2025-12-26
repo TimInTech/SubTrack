@@ -104,6 +104,13 @@ function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="subscription/add"
+        options={{
+          href: null,
+          title: 'Abo hinzufügen',
+        }}
+      />
+      <Tabs.Screen
         name="expense/[id]"
         options={{
           href: null,
