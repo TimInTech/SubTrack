@@ -1,8 +1,15 @@
 import { useState, useCallback } from 'react';
 import { Alert } from 'react-native';
 import { DashboardData, Subscription, Expense } from '../types';
+import {
+  loadAll as loadLocalSubscriptions,
+  createLocal,
+  updateLocal,
+  removeLocal,
+  findOne as findLocalSubscription,
+} from '../storage/subscriptionsStore';
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL?.trim() || '';
 
 // ===== Dashboard Hook =====
 export const useDashboard = () => {
@@ -55,38 +62,58 @@ export const useSubscriptions = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const loadLocal = useCallback(async () => {
+    const data = await loadLocalSubscriptions();
+    setSubscriptions(data);
+    return data;
+  }, []);
+
   const fetch = useCallback(async () => {
     try {
       setError(null);
+      if (!API_URL) {
+        await loadLocal();
+        return;
+      }
       const response = await globalThis.fetch(`${API_URL}/api/subscriptions`);
       if (response.ok) {
         const data = await response.json();
         setSubscriptions(data);
       } else {
+        await loadLocal();
         throw new Error('Failed to load subscriptions');
       }
     } catch (err) {
       setError('Verbindungsfehler');
       console.error('Subscriptions fetch error:', err);
+      await loadLocal();
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadLocal]);
 
   const fetchOne = useCallback(async (id: string): Promise<Subscription | null> => {
     try {
+      if (!API_URL) {
+        return await findLocalSubscription(id);
+      }
       const response = await globalThis.fetch(`${API_URL}/api/subscriptions/${id}`);
       if (response.ok) {
         return await response.json();
       }
-      return null;
+      return await findLocalSubscription(id);
     } catch {
-      return null;
+      return await findLocalSubscription(id);
     }
   }, []);
 
   const create = useCallback(async (data: Omit<Subscription, 'id' | 'created_at'>): Promise<boolean> => {
     try {
+      if (!API_URL) {
+        const updated = await createLocal(data);
+        setSubscriptions(updated);
+        return true;
+      }
       const response = await globalThis.fetch(`${API_URL}/api/subscriptions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -96,17 +123,23 @@ export const useSubscriptions = () => {
         await fetch();
         return true;
       }
-      const err = await response.json();
-      Alert.alert('Fehler', err.detail || 'Speichern fehlgeschlagen');
-      return false;
+      const err = await response.json().catch(() => ({}));
+      Alert.alert('Fehler', err.detail || 'Speichern fehlgeschlagen, wird lokal gespeichert.');
     } catch {
-      Alert.alert('Fehler', 'Verbindungsfehler beim Speichern');
-      return false;
+      // swallow to fallback to local
     }
+    const updated = await createLocal(data);
+    setSubscriptions(updated);
+    return true;
   }, [fetch]);
 
   const update = useCallback(async (id: string, data: Partial<Subscription>): Promise<boolean> => {
     try {
+      if (!API_URL) {
+        const updated = await updateLocal(id, data);
+        setSubscriptions(updated);
+        return true;
+      }
       const response = await globalThis.fetch(`${API_URL}/api/subscriptions/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -116,17 +149,23 @@ export const useSubscriptions = () => {
         await fetch();
         return true;
       }
-      const err = await response.json();
-      Alert.alert('Fehler', err.detail || 'Aktualisieren fehlgeschlagen');
-      return false;
+      const err = await response.json().catch(() => ({}));
+      Alert.alert('Fehler', err.detail || 'Aktualisieren fehlgeschlagen, wird lokal gespeichert.');
     } catch {
-      Alert.alert('Fehler', 'Verbindungsfehler beim Aktualisieren');
-      return false;
+      // swallow to fallback to local
     }
+    const updated = await updateLocal(id, data);
+    setSubscriptions(updated);
+    return true;
   }, [fetch]);
 
   const remove = useCallback(async (id: string): Promise<boolean> => {
     try {
+      if (!API_URL) {
+        const updated = await removeLocal(id);
+        setSubscriptions(updated);
+        return true;
+      }
       const response = await globalThis.fetch(`${API_URL}/api/subscriptions/${id}`, {
         method: 'DELETE',
       });
@@ -134,11 +173,13 @@ export const useSubscriptions = () => {
         await fetch();
         return true;
       }
-      return false;
+      Alert.alert('Fehler', 'Löschen fehlgeschlagen, wird lokal entfernt.');
     } catch {
-      Alert.alert('Fehler', 'Löschen fehlgeschlagen');
-      return false;
+      // swallow to fallback to local
     }
+    const updated = await removeLocal(id);
+    setSubscriptions(updated);
+    return true;
   }, [fetch]);
 
   return { subscriptions, loading, error, fetch, fetchOne, create, update, remove, setLoading };

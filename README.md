@@ -1,227 +1,160 @@
-# SubTrack (BuildKit) – Debug-APK unter WSL (Ubuntu 24.04)
+# Abo-Tracker - Abonnement & Fixkosten Verwaltung
 
-Dieses Repo enthält ein Expo/React-Native-Frontend. Eine „klassische“ APK entsteht hier über **Expo Prebuild** (erzeugt `frontend/android/`) und anschließend **Gradle** (`assembleDebug`).
+Eine Cross-Platform Mobile App zur Verwaltung von Abonnements und wiederkehrenden Fixkosten.
 
-## Projektstruktur (relevant)
-- `SubTrack-main/frontend/` – Expo App (`app.json`, `package.json`)
-- `SubTrack-main/frontend/scripts/build-debug-apk.sh` – 1-Command Build
-- `SubTrack-main/frontend/APK_BUILD_GUIDE.md` – Build-Guide (vorhanden)
+## Tech Stack
 
-## 1) ZIP von Windows nach WSL & entpacken
+- **Frontend**: Expo/React Native (TypeScript)
+- **Backend**: FastAPI (Python)
+- **Database**: MongoDB
 
-### Option A: ZIP liegt in Windows (Desktop)
-```powershell
-# PowerShell (Windows)
-$zip = "C:\Users\gummi\Desktop\SubTrack-main-buildkit.zip"
-wsl bash -lc "mkdir -p ~/src/SubTrack-main-buildkit && cd ~/src/SubTrack-main-buildkit && unzip -o '/mnt/c/Users/gummi/Desktop/SubTrack-main-buildkit.zip'"
-````
+---
 
-### Option B: Manuell im WSL-Pfad entpacken
+## Voraussetzungen
+
+| Tool | Version |
+|------|---------|
+| Node.js | 20.19.6 |
+| Yarn | 1.22.22 |
+| JDK | 17 |
+| Android SDK | platforms;android-35, build-tools;35.0.0 |
+
+---
+
+## Fresh Install & Build Debug APK
+
+Folge diesen Schritten für einen sauberen Build von Grund auf:
+
+### 1. Repository klonen
 
 ```bash
-# WSL (Ubuntu)
-mkdir -p ~/src/SubTrack-main-buildkit
-cd ~/src/SubTrack-main-buildkit
-unzip -o /mnt/c/Users/gummi/Desktop/SubTrack-main-buildkit.zip
+git clone <repo-url>
+cd <repo-name>
 ```
 
-Erwarteter Ordner danach:
+### 2. Node Version setzen (mit nvm)
 
 ```bash
-ls -la ~/src/SubTrack-main-buildkit/SubTrack-main
+nvm install 20.19.6
+nvm use 20.19.6
 ```
 
-## 2) System-Dependencies (WSL)
+### 3. Clean State (optional, bei Problemen)
 
 ```bash
-sudo apt update
-sudo apt install -y unzip zip git curl jq openjdk-17-jdk
+cd frontend
+rm -rf node_modules android ios .expo
 ```
 
-## 3) Node/Yarn korrekt setzen (wichtig)
-
-**Wichtig:** `npm i -g yarn` führte bei dir zu **EACCES** (global install in `/usr/lib/node_modules` ohne Rechte). Lösung: **Corepack** nutzen (kein sudo, keine global installs).
-
-### 3.1 Node Version per `.nvmrc`
-
-Im Repo existiert eine `.nvmrc` im Root von `SubTrack-main` (bei dir sichtbar). Nutze diese Version:
+### 4. Dependencies installieren
 
 ```bash
-# Falls nvm noch fehlt (einmalig)
-command -v nvm >/dev/null || curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-source ~/.nvm/nvm.sh
-
-cd ~/src/SubTrack-main-buildkit/SubTrack-main
-nvm install
-nvm use
-node -v
-npm -v
-```
-
-### 3.2 Yarn 1.22.22 via Corepack aktivieren
-
-```bash
-cd ~/src/SubTrack-main-buildkit/SubTrack-main/frontend
-corepack enable
-corepack prepare yarn@1.22.22 --activate
-yarn -v
-```
-
-### 3.3 Dependencies installieren (reproduzierbar)
-
-```bash
-cd ~/src/SubTrack-main-buildkit/SubTrack-main/frontend
+cd frontend
 yarn install --frozen-lockfile
 ```
 
-## 4) Debug-APK bauen (2 Wege)
-
-### Weg A (empfohlen): 1-Command Script
+### 5. Android Projekt generieren (Expo Prebuild)
 
 ```bash
-cd ~/src/SubTrack-main-buildkit/SubTrack-main/frontend
-chmod +x ./scripts/build-debug-apk.sh
-./scripts/build-debug-apk.sh
-```
-
-Das Script macht (kurz):
-
-1. `NODE_ENV=development`
-2. `yarn install --frozen-lockfile`
-3. `npx expo prebuild -p android --clean`
-4. `cd android && ./gradlew :app:assembleDebug`
-5. Prüft APK-Pfad
-
-### Weg B: Manuell Schritt für Schritt
-
-```bash
-cd ~/src/SubTrack-main-buildkit/SubTrack-main/frontend
-
 export NODE_ENV=development
-yarn install --frozen-lockfile
+npx expo prebuild --platform android --clean --no-install
+```
 
-NODE_ENV=development npx expo prebuild -p android --clean
+### 6. Debug APK bauen
 
+```bash
 cd android
-NODE_ENV=development ./gradlew :app:assembleDebug
-```
-
-## 5) Ergebnis: APK-Pfad
-
-```bash
-ls -lh ~/src/SubTrack-main-buildkit/SubTrack-main/frontend/android/app/build/outputs/apk/debug/app-debug.apk
-```
-
-Erwarteter Pfad:
-
-* `frontend/android/app/build/outputs/apk/debug/app-debug.apk`
-
-## 6) Installation / Verifikation (adb)
-
-### 6.1 adb installieren (falls fehlt)
-
-```bash
-sudo apt install -y android-sdk-platform-tools
-adb version
-```
-
-### 6.2 APK installieren
-
-```bash
-APK=~/src/SubTrack-main-buildkit/SubTrack-main/frontend/android/app/build/outputs/apk/debug/app-debug.apk
-adb devices
-adb install -r "$APK"
-```
-
-### 6.3 App-Start smoke test
-
-Package-Name steht in `frontend/app.json`:
-
-* `com.anonymous.frontend`
-
-```bash
-adb shell monkey -p com.anonymous.frontend 1
-```
-
-## 7) Android SDK Setup (wenn Gradle meckert)
-
-Wenn `SDK location not found` / `ANDROID_HOME` fehlt:
-
-1. Android Studio (Windows) installieren **oder** Commandline SDK in WSL einrichten.
-2. In WSL `ANDROID_HOME` setzen (Beispielpfad!):
-
-```bash
-export ANDROID_HOME="$HOME/Android/Sdk"
-export PATH="$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/emulator"
-```
-
-Persistieren:
-
-```bash
-cat >> ~/.bashrc <<'EOF'
-export ANDROID_HOME="$HOME/Android/Sdk"
-export PATH="$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/emulator"
-EOF
-source ~/.bashrc
-```
-
-## 8) Troubleshooting (häufig)
-
-### 8.1 Yarn global install EACCES
-
-Nicht `npm i -g yarn`. Stattdessen:
-
-```bash
-corepack enable
-corepack prepare yarn@1.22.22 --activate
-```
-
-### 8.2 Node Version mismatch
-
-```bash
-cd SubTrack-main
-nvm use
-node -v
-```
-
-### 8.3 Prebuild-Fehler wegen Assets
-
-Stelle sicher, dass diese Dateien existieren (laut `app.json`):
-
-* `frontend/assets/images/icon.png`
-* `frontend/assets/images/adaptive-icon.png`
-* `frontend/assets/images/splash-icon.png`
-* `frontend/assets/images/favicon.png`
-
-Check:
-
-```bash
-cd frontend
-ls -la assets/images/{icon.png,adaptive-icon.png,splash-icon.png,favicon.png}
-file assets/images/*.png
-```
-
-### 8.4 Clean Build
-
-```bash
-cd frontend
-npx expo prebuild -p android --clean
-cd android
-./gradlew clean
+chmod +x ./gradlew
 ./gradlew :app:assembleDebug
 ```
 
-## 9) Output zurück nach Windows kopieren
+### 7. APK finden
+
+```
+frontend/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+---
+
+## Development Server
+
+### Backend starten
 
 ```bash
-cp -v ~/src/SubTrack-main-buildkit/SubTrack-main/frontend/android/app/build/outputs/apk/debug/app-debug.apk /mnt/c/Users/gummi/Desktop/SubTrack-debug.apk
+cd backend
+pip install -r requirements.txt
+uvicorn server:app --reload --host 0.0.0.0 --port 8001
 ```
 
-## 10) Referenzen im Repo
+### Frontend (Expo Dev Server)
 
-* `frontend/APK_BUILD_GUIDE.md` (enthält Quickstart + CI Beispiel)
-* `frontend/scripts/build-debug-apk.sh` (automatisierter Build)
-* `frontend/scripts/validate-build-env.sh` (Prereq-Checks)
+```bash
+cd frontend
+yarn start
+```
+
+---
+
+## GitHub Actions
+
+Bei jedem Push auf `main`, `master` oder `conflict_251225_1038` wird automatisch eine Debug-APK gebaut.
+
+- Workflow: `.github/workflows/android.yml`
+- Artifact: `app-debug-apk` (14 Tage Retention)
+
+---
+
+## Features
+
+- Dashboard mit Monats-/Jahresübersicht
+- Abonnements verwalten (CRUD)
+- Fixkosten verwalten (CRUD)
+- Service-Presets (Netflix, Spotify, etc.)
+- Kostenverteilungs-Chart
+- JSON/CSV Export & Import
+- Benachrichtigungen vor Verlängerung
+- Einstellungen-Screen
+
+---
+
+## Projektstruktur
 
 ```
+├── backend/
+│   ├── server.py
+│   └── requirements.txt
+├── frontend/
+│   ├── app/               # Expo Router Screens
+│   ├── src/
+│   │   ├── components/
+│   │   ├── constants/
+│   │   ├── hooks/
+│   │   ├── types/
+│   │   └── utils/
+│   ├── app.json
+│   └── package.json
+└── .github/workflows/
+    └── android.yml
+```
+
+---
+
+## Troubleshooting
+
+### MainApplication.kt unresolved references
+
+Stelle sicher, dass `newArchEnabled: false` in `frontend/app.json` gesetzt ist.
+
+### NODE_ENV Fehler
+
+Setze immer `export NODE_ENV=development` vor dem Prebuild/Build.
+
+### Gradle Build Fehler
+
+```bash
+rm -rf frontend/android
+cd frontend
+export NODE_ENV=development
+npx expo prebuild -p android --clean --no-install
+cd android && ./gradlew :app:assembleDebug
 ```

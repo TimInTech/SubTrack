@@ -1,50 +1,140 @@
-# Welcome to your Expo app 👋
+# Frontend — Lokales Android Debug Build (WSL → Windows)
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+## Zweck
 
-## Get started
+Reproduzierbarer Debug-Build ohne EAS/Cloud. Baue in WSL, installiere/teste auf Windows/Android Studio (Device: Samsung A52 5G).
 
-1. Install dependencies
+## Voraussetzungen
 
-   ```bash
-   npm install
-   ```
+* Node/Yarn in WSL
+* Expo CLI (global oder via npx) in WSL
+* Android SDK, adb und Android Studio auf Windows (Install/Run auf Gerät)
+* adb/Installation bevorzugt unter Windows (WSL sieht Devices oft nicht)
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Schnelles Setup (VS Code, WSL)
 
 ```bash
-npm run reset-project
+cd /home/ubu/src/SubTrack
+code .
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Debug-Build (WSL)
 
-## Learn more
+### Option A — Hilfs-Skript (empfohlen)
 
-To learn more about developing your project with Expo, look at the following resources:
+```bash
+cd /home/ubu/src/SubTrack/frontend/scripts
+chmod +x build_and_deploy_debug.sh
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+./build_and_deploy_debug.sh
+./build_and_deploy_debug.sh --clean
+./build_and_deploy_debug.sh --prebuild
+```
 
-## Join the community
+Hinweis: `--prebuild` nur bei nativen Änderungen.
 
-Join our community of developers creating universal apps.
+### Option B — direkter Gradle-Build
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+cd /home/ubu/src/SubTrack/frontend/android
+./gradlew :app:assembleDebug --no-daemon
+```
+
+APK:
+`frontend/android/app/build/outputs/apk/debug/app-debug.apk`
+
+## WICHTIG: Debug vs. Standalone APK
+
+**Debug-APK** (Option A/B oben):
+* Benötigt Metro Bundler auf dem Entwicklungsrechner
+* Zeigt "Unable to load script" Fehler ohne Metro
+* Für Live-Development gedacht
+
+**Standalone-APK** (empfohlen für Tests):
+* Funktioniert ohne Metro Bundler
+* JavaScript-Bundle ist in APK eingebettet
+* Nutze Release-Build in WSL
+
+## Standalone APK bauen (für Tests ohne Metro)
+
+In WSL Ubuntu:
+
+```bash
+cd /home/ubu/src/SubTrack/frontend/android
+
+# local.properties erstellen (einmalig)
+echo "sdk.dir=/mnt/c/Users/gummi/AppData/Local/Android/Sdk" > local.properties
+
+# Release-APK bauen
+./gradlew :app:assembleRelease --no-daemon
+```
+
+APK-Pfad:
+`frontend/android/app/build/outputs/apk/release/app-release.apk`
+
+## Debug-APK mit Metro nutzen (Live-Development)
+
+Falls du Debug-APK nutzen willst:
+
+**1. Metro Bundler starten (WSL):**
+```bash
+cd /home/ubu/src/SubTrack/frontend
+npx expo start
+```
+
+**2. Port forwarding (Windows PowerShell):**
+```powershell
+adb reverse tcp:8081 tcp:8081
+```
+
+**3. App auf Gerät öffnen** → RELOAD (R, R)
+
+## APK nach Windows bringen & installieren
+
+In WSL (Pfad ggf. anpassen):
+
+```bash
+# Für Standalone (empfohlen)
+APK="/home/ubu/src/SubTrack/frontend/android/app/build/outputs/apk/release/app-release.apk"
+
+# Für Debug mit Metro
+# APK="/home/ubu/src/SubTrack/frontend/android/app/build/outputs/apk/debug/app-debug.apk"
+
+ls -lh "$APK"
+explorer.exe "$(wslpath -w "$(dirname "$APK")")"
+```
+
+In Windows PowerShell:
+
+```powershell
+adb devices
+adb install -r C:\path\to\app-release.apk
+```
+
+Oder Android Studio:
+
+* Open Project: `frontend/android`
+* Run (Device: Samsung A52 5G)
+
+## Smoke-Test (empfohlen)
+
+* Installiere Debug-APK auf A52 5G
+* Start → kein Crash
+* Navigation: „Expenses", „Subscriptions"
+* CRUD: Eintrag anlegen/bearbeiten
+* Logcat bei Fehlern (Windows PowerShell):
+
+```powershell
+adb logcat -v time *:S ReactNative:V ReactNativeJS:V
+```
+
+## Wichtige Hinweise
+
+* Kein EAS/Cloud nötig
+* `expo prebuild` nur bei nativen Änderungen
+* WSL für Build, Windows/Android Studio für adb/Device
+* Release erst nach stabilem Debug
+
+## Optional: CI / Automatisierung
+
+Wenn Debug stabil ist, kann eine minimale GitHub Action eine Debug-APK als Artifact bauen.
